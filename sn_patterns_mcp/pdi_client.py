@@ -199,19 +199,59 @@ class PdiClient:
         )
 
     def get_classifiers_for_pattern(self, pattern_sys_id: str) -> list[dict[str, Any]]:
-        """Try the two possible classifier tables. Re-raises auth/network errors;
-        only swallows table-not-found (caller can distinguish "no classifiers" vs broken PDI)."""
+        """Return classifiers that route discovery to this pattern.
+
+        A pattern has no direct classifier FK. The relationship runs through the
+        CI class: classifier.table (or .cmdb_ci_class on older releases) names a
+        CI table, and sa_pattern.ci_type names the same. We:
+          1. Look up the pattern's ci_type
+          2. Query discovery_classifier (base table — covers all subclasses
+             discovery_classy_proc / _snmp / _cim / _http_classifier / _ipid /
+             _port_probe via class-table polymorphism) with table = ci_type
+          3. Return the matching rows, including sys_class_name so the caller
+             can tell which classifier method matched
+
+        Returns [] if pattern is unknown, has no ci_type, or no classifiers
+        route to it. Re-raises auth/network errors; swallows table-not-found.
+        """
         if not _looks_like_sysid(pattern_sys_id):
             raise ValueError(f"sys_id must be 32 hex chars, got {pattern_sys_id!r}")
-        for table in ("discovery_classy_pattern", "discovery_classy"):
+
+        # 1. Resolve the pattern's CI type
+        pattern_rows = self.query(
+            "sa_pattern", f"sys_id={pattern_sys_id}",
+            fields=["sys_id", "name", "ci_type"], limit=1,
+        )
+        if not pattern_rows:
+            return []
+        ci_type = (pattern_rows[0].get("ci_type") or "").strip()
+        if not ci_type:
+            return []
+
+        # 2. Query the polymorphic base table. Field name for CI type is
+        #    `table` in modern releases, `cmdb_ci_class` in older ones.
+        fields = [
+            "sys_id", "name", "sys_class_name", "active",
+            "table", "cmdb_ci_class",
+            # Method-specific fields (only populated on matching subclass)
+            "process_search", "process_match",
+            "oid", "match_oid",
+            "wbem_namespace", "wbem_class",
+            "url_pattern", "match_url",
+        ]
+        for ci_field in ("table", "cmdb_ci_class"):
             try:
-                rows = self.query(table, f"pattern={pattern_sys_id}", limit=100)
+                rows = self.query(
+                    "discovery_classifier",
+                    f"{ci_field}={ci_type}^active=true",
+                    fields=fields, limit=100,
+                )
             except PdiUnavailable as e:
                 # auth/network error → propagate so caller sees the real reason
                 if "auth" in str(e).lower() or "request failed" in str(e).lower():
                     raise
-                # HTTP 4xx (table missing) → try the next table
-                log.debug("classifier table %s unavailable: %s", table, e)
+                # HTTP 4xx (table or column missing on this release) → try next
+                log.debug("classifier query on field %r failed: %s", ci_field, e)
                 continue
             if rows:
                 return rows

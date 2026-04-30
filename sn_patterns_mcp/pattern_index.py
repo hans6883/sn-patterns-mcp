@@ -141,6 +141,44 @@ class PatternIndex:
             if pattern is not None:
                 yield sys_id, pattern
 
+    def add_in_memory(
+        self,
+        *,
+        sys_id: str,
+        name: str,
+        pattern: Pattern,
+        ci_type: str = "",
+        description: str = "",
+        source: str = "ingested",
+    ) -> dict[str, Any]:
+        """Add a session-scoped pattern to the index without writing to disk.
+
+        The entry is flagged not_authoritative=true so downstream tools can
+        distinguish ingested patterns from PDI-fetched ones. The Pattern is
+        precached so PatternIndex.get() returns it without disk lookup.
+
+        Returns the manifest entry (for confirmation in the MCP response).
+        """
+        op_kws: list[str] = []
+        try:
+            op_kws = sorted(set(pattern.operation_keywords()))
+        except Exception:  # pragma: no cover - defensive
+            pass
+        entry = {
+            "name": name,
+            "description": description,
+            "ci_type": ci_type,
+            "cpattern_type": "0",
+            "operation_kws": op_kws,
+            "not_authoritative": True,
+            "source": source,
+        }
+        self.manifest[sys_id] = entry
+        self._cache[sys_id] = pattern
+        if name:
+            self._by_name[name.lower()] = sys_id
+        return entry
+
 
 # ---------------------------------------------------------------------------
 # Builder — consumes raw sa_pattern rows, parses NDL, writes JSON cache

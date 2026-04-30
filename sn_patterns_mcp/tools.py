@@ -1778,6 +1778,100 @@ def _walk_lib_refs(refs: list[str], index, pdi, seen: set[str], out: list[str],
                 _walk_lib_refs(sub_refs, index, pdi, seen, out, depth + 1, max_depth)
 
 
+def _looks_like_sys_id(s: str) -> bool:
+    """True if `s` is exactly 32 hex characters — the ServiceNow sys_id shape."""
+    if not s or len(s) != 32:
+        return False
+    return all(c in "0123456789abcdefABCDEF" for c in s)
+
+
+# ---------------------------------------------------------------------------
+# pattern_ingest_ndl — paste a community / forum pattern for this session
+# ---------------------------------------------------------------------------
+
+def pattern_ingest_ndl(
+    name: str,
+    ndl: str,
+    *,
+    index,
+    ci_type: str = "",
+    description: str = "",
+) -> str:
+    """Add a pattern to the in-memory index for this session.
+
+    The new entry is flagged not_authoritative=true so downstream tools and the
+    agent can distinguish it from PDI-fetched patterns. Enables the draft
+    harness (pattern_open_draft + draft_*) against arbitrary NDL the user pastes.
+
+    The session-scoped entry survives only until server restart; nothing is
+    written to disk.
+    """
+    if index is None:
+        return "ERROR: pattern_ingest_ndl requires a PatternIndex (server not initialized)"
+    if not name or not name.strip():
+        return "ERROR: name is required"
+    if not ndl or not ndl.strip():
+        return "ERROR: ndl text is required"
+    if len(ndl.encode("utf-8")) > MAX_NDL_INPUT_BYTES:
+        return f"ERROR: ndl exceeds {MAX_NDL_INPUT_BYTES} bytes"
+
+    # Parse — pattern OR library; either is valid.
+    parser = NdlParser()
+    try:
+        pattern = parser.parse(ndl)
+    except NdlSyntaxError as e:
+        return f"ERROR: NDL failed to parse: {e}"
+    except Exception as e:
+        return f"ERROR: ingest crashed parsing NDL: {e}"
+
+    # Resolve sys_id. Prefer the NDL metadata.id when it's a real 32-char hex
+    # (so callers using the original sys_id can find the entry). Otherwise mint
+    # one — the original metadata.id is preserved on the Pattern object itself.
+    metadata_id = (pattern.metadata.id or "").strip()
+    sys_id = ""
+    if _looks_like_sys_id(metadata_id):
+        existing = index.manifest.get(metadata_id)
+        if existing and not existing.get("not_authoritative", False):
+            sys_id = secrets.token_hex(16)
+            log.info(
+                "ingest: NDL metadata.id %s collides with authoritative entry; minting %s instead",
+                metadata_id, sys_id,
+            )
+        else:
+            sys_id = metadata_id
+    else:
+        sys_id = secrets.token_hex(16)
+
+    final_name = name.strip()
+    # If the manifest already has a different entry with this name (from PDI),
+    # rename the ingest with a "(ingested)" suffix to keep both reachable.
+    other_sys_id = index._by_name.get(final_name.lower())  # type: ignore[attr-defined]
+    if other_sys_id and other_sys_id != sys_id:
+        other_entry = index.manifest.get(other_sys_id, {})
+        if not other_entry.get("not_authoritative", False):
+            final_name = f"{final_name} (ingested)"
+
+    entry = index.add_in_memory(
+        sys_id=sys_id, name=final_name, pattern=pattern,
+        ci_type=ci_type or pattern.metadata.ci_type or "",
+        description=description or pattern.metadata.description or "",
+    )
+    payload = {
+        "ok": True,
+        "sys_id": sys_id,
+        "name": final_name,
+        "ci_type": entry.get("ci_type", ""),
+        "operation_count": len(entry.get("operation_kws", [])),
+        "not_authoritative": True,
+        "note": (
+            "Session-scoped; survives until server restart. Use the returned sys_id "
+            "with pattern_open_draft, pattern_analyze, etc. The 'not_authoritative' "
+            "flag distinguishes it from PDI-fetched patterns."
+        ),
+    }
+    return _clip(json.dumps(payload, indent=2))
+
+
 __all__ = [
     "pattern_analyze",
     "pattern_resolve",
@@ -1796,5 +1890,6 @@ __all__ = [
     "pattern_lineage",
     "pattern_data_sources",
     "pattern_data_sources_lookup",
+    "pattern_ingest_ndl",
     "MAX_CHARS",
 ]

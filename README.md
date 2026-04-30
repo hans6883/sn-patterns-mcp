@@ -2,14 +2,14 @@
 
 > Pattern-intelligence MCP server for ServiceNow Discovery. Gives any AI agent the ability to read, search, validate, author, and reason about ServiceNow Discovery patterns — including the NDL grammar, the 90 underlying operation closures, the SNMP OIDs they touch, the WMI / shell / registry / REST data sources they ingest, and the libraries / extensions / pre-post scripts that surround them.
 
-[![tests](https://img.shields.io/badge/tests-229%2F229-green)]()
+[![tests](https://img.shields.io/badge/tests-245%2F245-green)]()
 [![ruff](https://img.shields.io/badge/lint-ruff%20clean-green)]()
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ## What it does
 
-ServiceNow Discovery patterns are procedural definitions written in **NDL** (Network Discovery Language) that tell the MID Server how to identify, classify, and inventory configuration items (CIs). This project gives AI agents a comprehensive understanding of those patterns through 25 stdio MCP tools:
+ServiceNow Discovery patterns are procedural definitions written in **NDL** (Network Discovery Language) that tell the MID Server how to identify, classify, and inventory configuration items (CIs). This project gives AI agents a comprehensive understanding of those patterns through 26 stdio MCP tools:
 
 - **Read & explain** — step-by-step breakdown of any pattern, with operation-level semantics, inline OID resolution for SNMP steps, and source-tagged data (PDI live vs local index).
 - **Search** — semantic search across the pattern corpus by intent ("Tomcat on Linux") and across the 847K-OID MIB knowledge base by keyword or natural language.
@@ -27,10 +27,10 @@ cd sn-patterns-mcp
 python -m venv .venv
 .venv/Scripts/activate     # Windows; or `source .venv/bin/activate`
 pip install -e .[dev]
-pytest -q                   # 229/229 should pass
+pytest -q                   # 245/245 should pass
 ```
 
-The 25 tools work immediately against bundled fixtures. To enable the full corpus:
+The 26 tools work immediately against bundled fixtures. To enable the full corpus:
 
 ```bash
 # 1. (Optional) Build the OID/MIB knowledge base — ~15 min the first time
@@ -74,6 +74,7 @@ Without step 1, the four OID tools (`oid_lookup`, `oid_walk_explain`, `oid_searc
 | `draft_finalize` | Materialize: `serialize_only` / `sandbox` / `push_live`. | Done editing. |
 | `draft_abandon` | Drop a draft and its child drafts. | Starting over / cleanup. |
 | `closure_capability` | Per-closure: signature + recipes addressing known limitations (e.g. `run_wmi_query_to_var.namespace_existence_probe`). | Discovering how to work around closure-level gaps. |
+| `pattern_ingest_ndl` | Add a pattern (or library) to the in-memory index for this session, flagged `not_authoritative=true`. | User pastes a community / forum / decommissioned-pattern NDL the indexed corpus doesn't have. |
 
 All tools return plain text capped at 8000 chars and never raise — failures arrive as `ERROR:` prefixed responses with the reason.
 
@@ -192,7 +193,7 @@ At runtime the loader orders authoritative IETF MIBs (`SNMPv2-MIB`, `IF-MIB`, `H
 ## Verification
 
 ```bash
-pytest -q                                     # 229/229
+pytest -q                                     # 245/245
 python scripts/export_patterns.py --limit 5   # smoke test PDI fetch
 python -m sn_patterns_mcp.server               # stdio server boots; ^C to exit
 ```

@@ -1,6 +1,6 @@
 # Agent Guide — sn-patterns-mcp
 
-You (Claude / Codex / any AI agent) have access to 25 tools that give you expert understanding of ServiceNow Discovery patterns and the ability to surgically edit them. This document tells you when to use which tool, what to expect back, and how to chain them.
+You (Claude / Codex / any AI agent) have access to 26 tools that give you expert understanding of ServiceNow Discovery patterns and the ability to surgically edit them. This document tells you when to use which tool, what to expect back, and how to chain them.
 
 ## Mental model
 
@@ -36,6 +36,7 @@ The repo indexes 1227 real ServiceNow patterns plus a registry of 117 closure ty
 | "What data is available on a Windows server?" / "What does Win32_Service give me?" | `pattern_data_sources_lookup` | Browse the bundled data-source catalog (Windows / Linux / F5 / Cisco) |
 | "Clone X and customize it" / "Add a guard before this step" / "Fix this hardcoded path" | `pattern_open_draft` → `draft_*` | Surgical-edit harness — see "Surgical-edit workflow" below |
 | "What can run_wmi_query_to_var NOT do, and how do I work around it?" | `closure_capability` | Closure limitations + parameterized recipe library |
+| "Here's an NDL from a forum post — analyze / fix it" | `pattern_ingest_ndl` then any other tool | Adds session-scoped pattern to the in-memory index (flagged `not_authoritative=true`) so all other tools work against it |
 
 ## Surgical-edit workflow (the v0.3 flagship)
 

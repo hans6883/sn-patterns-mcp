@@ -213,7 +213,16 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Describe a closure: required inputs, outputs, semantics, and the list of recipes addressing "
         "its known limitations. Recipes are tested NDL fragments parameterized for re-use. Use this "
         "WHEN you need to know how to work around a closure-level gap (e.g. run_wmi_query_to_var "
-        "doesn't validate namespace existence — there's a recipe for that)."
+        "doesn't validate namespace existence — there's a recipe for that). Always returns a JSON "
+        "object with `known: bool` — unknown closure keywords are NOT errors."
+    ),
+    "pattern_ingest_ndl": (
+        "Add a pattern (or library) to the in-memory index for THIS SESSION ONLY from raw NDL text. "
+        "Use this when the user pastes a community pattern, a forum-thread NDL fragment, or a "
+        "decommissioned pattern not in the indexed corpus — and wants to analyze it with the regular "
+        "tools (pattern_analyze, pattern_lineage, pattern_open_draft, etc.). The new entry is flagged "
+        "not_authoritative=true so it can be distinguished from PDI-fetched patterns. Survives only "
+        "until server restart. Returns the sys_id you can pass to all other tools."
     ),
 }
 
@@ -336,6 +345,13 @@ def _make_tool_list():
              inputSchema=_input({"draft_id": {"type": "string"}}, ["draft_id"])),
         Tool(name="closure_capability", description=TOOL_DESCRIPTIONS["closure_capability"],
              inputSchema=_input({"closure_keyword": {"type": "string"}}, ["closure_keyword"])),
+        Tool(name="pattern_ingest_ndl", description=TOOL_DESCRIPTIONS["pattern_ingest_ndl"],
+             inputSchema=_input({
+                 "name": {"type": "string", "description": "Display name for the ingested pattern"},
+                 "ndl": {"type": "string", "description": "Raw NDL text (max 1 MiB)"},
+                 "ci_type": {"type": "string", "description": "Optional cmdb_ci_* CI type (defaults to NDL metadata.citype)"},
+                 "description": {"type": "string", "description": "Optional human description"},
+             }, ["name", "ndl"])),
     ]
 
 
@@ -482,6 +498,13 @@ class SnPatternsServer:
             return dtools.draft_abandon(arguments["draft_id"], store=self.drafts)
         if name == "closure_capability":
             return dtools.closure_capability(arguments["closure_keyword"])
+        if name == "pattern_ingest_ndl":
+            return ptools.pattern_ingest_ndl(
+                arguments["name"], arguments["ndl"],
+                index=ctx["index"],
+                ci_type=arguments.get("ci_type", ""),
+                description=arguments.get("description", ""),
+            )
         return f"ERROR: unknown tool: {name}"
 
     async def run(self) -> None:
