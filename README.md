@@ -1,0 +1,191 @@
+# sn-patterns-mcp
+
+> Pattern-intelligence MCP server for ServiceNow Discovery. Gives any AI agent the ability to read, search, validate, author, and reason about ServiceNow Discovery patterns — including the NDL grammar, the 90 underlying operation closures, the SNMP OIDs they touch, the WMI / shell / registry / REST data sources they ingest, and the libraries / extensions / pre-post scripts that surround them.
+
+[![tests](https://img.shields.io/badge/tests-181%2F181-green)]()
+[![ruff](https://img.shields.io/badge/lint-ruff%20clean-green)]()
+[![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+## What it does
+
+ServiceNow Discovery patterns are procedural definitions written in **NDL** (Network Discovery Language) that tell the MID Server how to identify, classify, and inventory configuration items (CIs). This project gives AI agents a comprehensive understanding of those patterns through 17 stdio MCP tools:
+
+- **Read & explain** — step-by-step breakdown of any pattern, with operation-level semantics, inline OID resolution for SNMP steps, and source-tagged data (PDI live vs local index).
+- **Search** — semantic search across the pattern corpus by intent ("Tomcat on Linux") and across the 847K-OID MIB knowledge base by keyword or natural language.
+- **Validate** — Tier-1 local checks (syntax, parser/writer roundtrip, metadata, refids, closure required-inputs, variable read-before-write with discovery-context awareness) and Tier-2 PDI compile testing in a sandboxed `sa_pattern` row with self-healing role grants.
+- **Author** — research nearest-neighbor patterns + relevant closures + a skeleton, draft NDL, validate locally, compile-test against PDI, then push.
+- **Trace lineage** — full dependency graph: shared libraries (recursive), extensions, classifiers routing to the pattern, pre/post scripts and the variables they inject, and provenance of every variable the pattern reads.
+- **Inventory data sources** — for any pattern, list every WMI class, shell command, registry key, SNMP OID, file path, or HTTP endpoint it touches, classified by target (Windows / Linux / F5 / Cisco) and cross-referenced against a 90-entry catalog showing which closure ingests each and what CMDB attribute it typically populates.
+
+## Quick start
+
+```bash
+git clone <this-repo>
+cd sn-patterns-mcp
+python -m venv .venv
+.venv/Scripts/activate     # Windows; or `source .venv/bin/activate`
+pip install -e .[dev]
+pytest -q                   # 181/181 should pass
+```
+
+The 17 tools work immediately against bundled fixtures. To enable the full corpus:
+
+```bash
+# 1. (Optional) Build the OID/MIB knowledge base — ~15 min the first time
+python scripts/build_oid_index.py
+
+# 2. (Optional) Hydrate the pattern index from your ServiceNow instance
+export SN_INSTANCE=https://your-instance.service-now.com
+export SN_USERNAME=admin
+export SN_PASSWORD=...
+python scripts/export_patterns.py --limit 2000 --populate-chroma
+```
+
+Without step 1, the four OID tools (`oid_lookup`, `oid_walk_explain`, `oid_search`, `pattern_snmp_audit`) operate against a small bundled seed set instead of the full 847K-OID corpus. Without step 2, pattern search and analysis run against fixtures only.
+
+## Tools
+
+| Tool | What it does | Use when |
+|------|---|---|
+| `pattern_analyze` | Step-by-step breakdown with operation-level detail. | User names a known pattern. |
+| `pattern_resolve` | Shared libs + classifiers + pre/post scripts + commands. | User asks "what runs alongside X?" |
+| `pattern_debug` | Operation-aware debug plan with log queries. | User reports a failing pattern. |
+| `pattern_search` | Semantic + substring search over the corpus. | User describes intent, not name. |
+| `ndl_explain` | Parse arbitrary NDL paste and explain. | User pastes NDL inline. |
+| `pattern_compare` | Structural diff of two patterns. | User asks "how do A and B differ?" |
+| `pattern_validate` | Local Tier-1 validation of NDL text. | After drafting NDL, before upload. |
+| `pattern_create` | Synthesis context (neighbors + closures + skeleton). | User asks to *create* a pattern. |
+| `pattern_test_compile` | Tier-2: upload to sandbox `sa_pattern`, observe SN accept/reject, cleanup. | After local validation passes. |
+| `pattern_diff_against_live` | Fetch live PDI version, structural + textual diff against local draft. | Before pushing edits. |
+| `oid_lookup` | Resolve any SNMP OID (dotted or by name) — name, MIB, syntax, description, vendor. | Reading SNMP discovery patterns. |
+| `oid_walk_explain` | Show structure under an OID prefix (table columns, group leaves) + iteration hint. | Understanding what an SNMP walk returns. |
+| `oid_search` | Natural-language search across the full corpus (FTS5 primary, ChromaDB fallback). | "Find OIDs about BGP session state". |
+| `pattern_snmp_audit` | For each `run_snmp_*` step, resolve OID → MIB → vendor; flag unresolved + vendor-lock. | Reviewing or porting an SNMP pattern. |
+| `pattern_lineage` | Full dependency graph: libraries, extensions, classifiers, pre/post, variable provenance. | "Where does this pattern fit?" |
+| `pattern_data_sources` | Per-pattern: WMI / shell / registry / SNMP / file / HTTP enumeration. | "What is this pattern actually collecting?" |
+| `pattern_data_sources_lookup` | Browse data-source catalog: Windows WMI, Linux, F5 tmsh, Cisco show. | "What data is on a Windows server?" |
+
+All tools return plain text capped at 8000 chars and never raise — failures arrive as `ERROR:` prefixed responses with the reason.
+
+`pattern_analyze` automatically inline-resolves SNMP OIDs in `run_snmp_*` steps, so you see `1.3.6.1.2.1.1.5 → SNMPv2-MIB::sysName` next to the step without calling `oid_lookup` separately.
+
+> **For AI agents using these tools:** start with [docs/AGENTS.md](docs/AGENTS.md) — it tells you when to call which tool and what to expect back.
+
+## Register with an MCP-aware client
+
+Add to `.mcp.json` (project-local) or `~/.mcp.json` (global):
+
+```json
+{
+  "mcpServers": {
+    "sn-patterns": {
+      "command": "python",
+      "args": ["-m", "sn_patterns_mcp.server"],
+      "transport": "stdio",
+      "env": {
+        "SN_PATTERNS_INDEX_ROOT": "/abs/path/to/sn-patterns-mcp/sn_patterns_mcp/pattern_index",
+        "SN_PATTERNS_CHROMA_DIR": "/abs/path/to/.sn_patterns_mcp/chroma",
+        "SN_INSTANCE": "https://your-instance.service-now.com",
+        "SN_USERNAME": "admin",
+        "SN_PASSWORD": "your-pdi-password",
+        "SN_PATTERNS_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}
+```
+
+PDI credentials are optional — the server runs offline (no Tier-2 PDI compile / live diff) without them. Logs go to stderr; never to stdout (which would corrupt the MCP JSON-RPC protocol).
+
+## Direct Python usage (no MCP)
+
+```python
+from sn_patterns_mcp.pattern_index import PatternIndex
+from sn_patterns_mcp.tools import pattern_analyze, pattern_search, pattern_validate
+
+INDEX = PatternIndex.load("/abs/path/to/sn_patterns_mcp/pattern_index")
+
+print(pattern_analyze("Apache HTTP Server On Unix", index=INDEX, pdi=None))
+print(pattern_search("Tomcat on Linux", index=INDEX, chroma=None))
+print(pattern_validate(my_ndl_string))
+```
+
+## Architecture
+
+```
+sn_patterns_mcp/
+├── ndl_parser.py        Recursive-descent NDL parser
+├── ndl_writer.py        NDL serializer (canonical block layout)
+├── pattern_model.py     Dataclasses: Pattern, Step, Operation, Identification, ...
+├── closures/registry.py 90 ClosureDescriptors with semantics, inputs, outputs
+├── validator.py         Tier-1 validation (syntax, roundtrip, refids, var ordering)
+├── prepost.py           Pre/post script analyzer (CTX.setAttribute extraction)
+├── pattern_index.py     On-disk JSON cache + manifest with semantic facets
+├── chroma_index.py      ChromaDB sn_patterns_structured collection wrapper
+├── pdi_client.py        ServiceNow REST client (with sysparm_query injection guard)
+├── local_data.py        Offline auxiliary data (prepost / classifiers / extensions)
+├── data_sources/        Catalog of data points per target (Windows / Linux / F5 / Cisco)
+├── oids/                SQLite-backed OID/MIB knowledge base + Chroma semantic index
+├── tools.py             MCP tool implementations
+└── server.py            stdio MCP server entry point + tool descriptions
+```
+
+### Three-tier testing strategy
+
+This project tests patterns at three tiers because pattern testing without real targets is the actual problem:
+
+| Tier | What it validates | Implementation |
+|------|---|---|
+| **Tier 1** | Syntax, parser/writer agreement, refids, var ordering, metadata, required closure inputs. **Zero PDI dependency.** | `validator.py` → `pattern_validate` tool |
+| **Tier 2** | ServiceNow accepts the NDL on save (server-side semantic checks, dictionary validation). **No execution.** | `pattern_test_compile` tool — uploads to a sandbox `sa_pattern` row (name prefix `_sandbox_snmcp_`), observes accept/reject, cleans up |
+| **Tier 3** | Pattern logic against synthetic device responses. **Future.** | Planned: scenario-driven emulator |
+
+`pattern_test_compile` self-heals first-run permission gaps (auto-grants the role required for `sa_pattern` writes and retries on 403) so it works out of the box.
+
+### OID / MIB knowledge base
+
+`sn_patterns_mcp/oids/` is a SQLite-backed OID/MIB index with 847K+ entries across 6,800+ MIBs. Cold start <50ms, sub-millisecond indexed lookups, FTS5 keyword search across name + description, ChromaDB semantic fallback for natural-language queries.
+
+The harvester (`scripts/build_oid_index.py`) pulls MIB definitions from seven public GitHub repositories and resolves their cross-references locally. Build locally:
+
+```bash
+python scripts/build_oid_index.py                   # full multi-source build (~15 min)
+python scripts/build_oid_index.py --sources librenms # one source only
+python scripts/build_oid_index.py --max-files 500   # smoke test
+python scripts/build_oid_index.py --refresh         # ignore cache
+```
+
+> **License note for the OID build:** the harvester pulls MIB definitions from seven public GitHub repositories, each with its own license (Apache 2.0, MIT, BSD, or unspecified). When you run the harvester, files land in your local cache (`~/.sn_patterns_mcp/mib_cache/`) and you become subject to each upstream license. This project does not redistribute any MIB content — the cache and the resulting `oids.db` are gitignored.
+
+At runtime the loader orders authoritative IETF MIBs (`SNMPv2-MIB`, `IF-MIB`, `HOST-RESOURCES-MIB`, etc.) before vendor MIBs and applies first-write-wins on OID conflicts. Cross-authority children are filtered at `walk()` time so the standard tree returns clean results.
+
+## Verification
+
+```bash
+pytest -q                                     # 181/181
+python scripts/export_patterns.py --limit 5   # smoke test PDI fetch
+python -m sn_patterns_mcp.server               # stdio server boots; ^C to exit
+```
+
+Quick health check:
+
+```python
+from sn_patterns_mcp.pattern_index import PatternIndex
+from sn_patterns_mcp.validator import PatternValidator
+import json
+
+index = PatternIndex.load("sn_patterns_mcp/pattern_index")
+print(f"{index.size()} patterns")
+
+sys_id = next(iter(index.manifest))
+src = json.loads((index.root / "patterns" / f"{sys_id}.json").read_text())["source_ndl"]
+result = PatternValidator().validate(src)
+assert result.is_valid
+```
+
+## License
+
+[MIT](LICENSE) — see also [CONTRIBUTING.md](CONTRIBUTING.md).
+
+ServiceNow, the ServiceNow logo, and "ServiceNow Discovery" are trademarks of ServiceNow, Inc. This project is not affiliated with or endorsed by ServiceNow.

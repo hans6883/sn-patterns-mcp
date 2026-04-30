@@ -1,0 +1,213 @@
+{
+  "target": "f5",
+  "description": "F5 BIG-IP load balancer data points. Three primary access methods: tmsh CLI (over SSH), iControl REST (HTTPS), and SNMP (F5-BIGIP-LOCAL-MIB / F5-BIGIP-SYSTEM-MIB).",
+  "data_points": [
+    {
+      "name": "tmsh show sys version",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "TMOS version, build, edition, hotfix list. The canonical version-discovery call.",
+      "typical_ci": "cmdb_ci_lb_bigip: version, edition, build",
+      "example_query": "tmsh show sys version",
+      "fields": ["Version", "Build", "Edition", "Date", "Hotfix"]
+    },
+    {
+      "name": "tmsh show sys hardware",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Chassis serial number, platform type, hardware revision, blade count.",
+      "typical_ci": "cmdb_ci_lb_bigip: serial_number, model_id, hardware_version",
+      "example_query": "tmsh show sys hardware",
+      "fields": ["Chassis Serial", "Platform", "Name", "BIOS Revision", "Hardware Revision"]
+    },
+    {
+      "name": "tmsh show sys global-settings",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Global system configuration including hostname, mgmt IP, gui-setup state.",
+      "typical_ci": "cmdb_ci_lb_bigip: name, mgmt_address",
+      "example_query": "tmsh show sys global-settings hostname mgmt-dhcp",
+      "fields": ["hostname", "mgmt-dhcp", "console-inactivity-timeout"]
+    },
+    {
+      "name": "tmsh list ltm virtual all-properties",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Every virtual server (LTM VIP). The cornerstone of LB discovery: address, port, protocol, default pool, profiles, irules.",
+      "typical_ci": "cmdb_ci_lb_service: name, virtual_address, virtual_port, default_pool",
+      "example_query": "tmsh list ltm virtual all-properties one-line",
+      "fields": ["name", "destination", "ip-protocol", "pool", "profiles", "rules", "snat", "persist", "vlans-enabled", "source"]
+    },
+    {
+      "name": "tmsh list ltm pool all-properties",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Server pools that VIPs send traffic to. Includes member nodes, monitors, load-balancing method.",
+      "typical_ci": "cmdb_ci_lb_pool: name, members[]",
+      "example_query": "tmsh list ltm pool all-properties one-line",
+      "fields": ["name", "members", "monitor", "load-balancing-mode", "min-active-members"]
+    },
+    {
+      "name": "tmsh list ltm node",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Backend node IP addresses (pool members reference these).",
+      "typical_ci": "cmdb_ci_lb_pool_member.ip_address",
+      "example_query": "tmsh list ltm node",
+      "fields": ["name", "address", "monitor", "session", "state"]
+    },
+    {
+      "name": "tmsh list ltm rule",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "iRules — TCL scripts that intercept and manipulate traffic. Critical for understanding business logic.",
+      "typical_ci": "cmdb_ci_lb_irule",
+      "example_query": "tmsh list ltm rule one-line",
+      "fields": ["name", "api-anonymous"]
+    },
+    {
+      "name": "tmsh list ltm profile http",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "HTTP profiles (compression, caching, X-Forwarded-For etc.).",
+      "typical_ci": "cmdb_ci_lb_profile",
+      "example_query": "tmsh list ltm profile http",
+      "fields": ["name", "defaults-from", "insert-xforwarded-for", "redirect-rewrite"]
+    },
+    {
+      "name": "tmsh list ltm profile client-ssl",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Client-side SSL profiles. Key for cert/key bindings + cipher policy.",
+      "typical_ci": "cmdb_ci_lb_profile_ssl",
+      "example_query": "tmsh list ltm profile client-ssl",
+      "fields": ["name", "cert", "key", "ciphers", "ssl-protocol-version"]
+    },
+    {
+      "name": "tmsh list sys file ssl-cert",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Installed SSL certificates with expiry, common name, issuer.",
+      "typical_ci": "cmdb_ci_certificate",
+      "example_query": "tmsh list sys file ssl-cert",
+      "fields": ["name", "common-name", "expiration-date", "issuer", "subject-alternative-name"]
+    },
+    {
+      "name": "tmsh list net interface",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Physical/aggregate interfaces.",
+      "typical_ci": "cmdb_ci_network_adapter (on F5)",
+      "example_query": "tmsh list net interface",
+      "fields": ["name", "media-active", "mac-address", "description"]
+    },
+    {
+      "name": "tmsh list net vlan",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "VLANs and their interface assignments.",
+      "typical_ci": "cmdb_ci_vlan",
+      "example_query": "tmsh list net vlan",
+      "fields": ["name", "tag", "interfaces"]
+    },
+    {
+      "name": "tmsh list net self",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Self IP addresses (the IPs the BIG-IP itself listens on, distinct from VIPs).",
+      "typical_ci": "cmdb_ci_lb_self_ip",
+      "example_query": "tmsh list net self",
+      "fields": ["name", "address", "vlan", "traffic-group"]
+    },
+    {
+      "name": "tmsh list cm device",
+      "access_method": "tmsh",
+      "closure": "runcmd_to_var",
+      "description": "Cluster device list — for HA pair discovery.",
+      "typical_ci": "cmdb_ci_lb_ha_pair",
+      "example_query": "tmsh list cm device",
+      "fields": ["name", "hostname", "management-ip", "configsync-ip", "self-device", "failover-state"]
+    },
+    {
+      "name": "/mgmt/tm/sys/version",
+      "access_method": "rest",
+      "closure": "http_invoke",
+      "description": "iControl REST: TMOS version. JSON response: {entries: {version: '15.1.5'}}.",
+      "typical_ci": "cmdb_ci_lb_bigip.version",
+      "example_query": "GET https://<bigip>/mgmt/tm/sys/version",
+      "fields": ["Version", "Build", "Edition"]
+    },
+    {
+      "name": "/mgmt/tm/ltm/virtual",
+      "access_method": "rest",
+      "closure": "http_invoke",
+      "description": "iControl REST virtual server collection. Returns JSON with all VIPs + their properties.",
+      "typical_ci": "cmdb_ci_lb_service",
+      "example_query": "GET https://<bigip>/mgmt/tm/ltm/virtual?expandSubcollections=true",
+      "fields": ["name", "destination", "pool", "ipProtocol", "profilesReference"]
+    },
+    {
+      "name": "/mgmt/tm/ltm/pool",
+      "access_method": "rest",
+      "closure": "http_invoke",
+      "description": "iControl REST pool collection.",
+      "typical_ci": "cmdb_ci_lb_pool",
+      "example_query": "GET https://<bigip>/mgmt/tm/ltm/pool?expandSubcollections=true",
+      "fields": ["name", "membersReference", "monitor", "loadBalancingMode"]
+    },
+    {
+      "name": "/mgmt/tm/ltm/node",
+      "access_method": "rest",
+      "closure": "http_invoke",
+      "description": "iControl REST node collection (backend server addresses).",
+      "typical_ci": "cmdb_ci_lb_pool_member",
+      "example_query": "GET https://<bigip>/mgmt/tm/ltm/node",
+      "fields": ["name", "address", "state", "session"]
+    },
+    {
+      "name": "/mgmt/tm/sys/file/ssl-cert",
+      "access_method": "rest",
+      "closure": "http_invoke",
+      "description": "SSL certificates via REST.",
+      "typical_ci": "cmdb_ci_certificate",
+      "example_query": "GET https://<bigip>/mgmt/tm/sys/file/ssl-cert",
+      "fields": ["name", "commonName", "expirationDate", "issuer", "subjectAlternativeName"]
+    },
+    {
+      "name": "F5-BIGIP-SYSTEM-MIB::sysProductVersion",
+      "access_method": "snmp",
+      "closure": "run_snmp_to_var",
+      "description": "TMOS version via SNMP. OID 1.3.6.1.4.1.3375.2.1.4.2.0.",
+      "typical_ci": "cmdb_ci_lb_bigip.version",
+      "example_query": "1.3.6.1.4.1.3375.2.1.4.2.0",
+      "fields": []
+    },
+    {
+      "name": "F5-BIGIP-LOCAL-MIB::ltmVirtualServTable",
+      "access_method": "snmp",
+      "closure": "run_snmp_to_var",
+      "description": "Virtual server table via SNMP. Walk OID 1.3.6.1.4.1.3375.2.2.10.1.2.",
+      "typical_ci": "cmdb_ci_lb_service",
+      "example_query": "1.3.6.1.4.1.3375.2.2.10.1.2",
+      "fields": ["ltmVirtualServName", "ltmVirtualServAddr", "ltmVirtualServPort", "ltmVirtualServDefaultPool"]
+    },
+    {
+      "name": "F5-BIGIP-LOCAL-MIB::ltmPoolTable",
+      "access_method": "snmp",
+      "closure": "run_snmp_to_var",
+      "description": "Pool table via SNMP. Walk OID 1.3.6.1.4.1.3375.2.2.5.1.2.",
+      "typical_ci": "cmdb_ci_lb_pool",
+      "example_query": "1.3.6.1.4.1.3375.2.2.5.1.2",
+      "fields": ["ltmPoolName", "ltmPoolLbMode", "ltmPoolMonitorRule"]
+    },
+    {
+      "name": "F5-BIGIP-SYSTEM-MIB::sysCpuSensorTemperature",
+      "access_method": "snmp",
+      "closure": "run_snmp_to_var",
+      "description": "CPU temperature sensor — health monitoring.",
+      "typical_ci": "cmdb_ci_lb_bigip.health_metrics",
+      "example_query": "1.3.6.1.4.1.3375.2.1.3.6.2.1.2",
+      "fields": []
+    }
+  ]
+}

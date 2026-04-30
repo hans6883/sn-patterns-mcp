@@ -1,0 +1,398 @@
+"""MCP stdio server exposing the 17 ServiceNow Discovery pattern tools.
+
+CRITICAL: stdout is reserved for MCP JSON-RPC. All logging must go to stderr.
+
+Environment variables:
+    SN_PATTERNS_INDEX_ROOT  Override pattern index location (default: ./pattern_index)
+    SN_PATTERNS_CHROMA_DIR  Override Chroma DB location (default: ~/.sn_patterns_mcp/chroma)
+    SN_PATTERNS_DEBUG       Set to 1 to include full tracebacks in tool output
+    SN_PATTERNS_LOG_LEVEL   Override stderr log level (DEBUG/INFO/WARNING/ERROR; default INFO)
+    SN_INSTANCE / SN_USERNAME / SN_PASSWORD   Optional PDI live-fallback credentials
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import sys
+import traceback
+from pathlib import Path
+
+from sn_patterns_mcp import tools as ptools
+from sn_patterns_mcp.chroma_index import ChromaPatternIndex
+from sn_patterns_mcp.pattern_index import PatternIndex
+from sn_patterns_mcp.pdi_client import PdiUnavailable, try_create_client
+
+log = logging.getLogger(__name__)
+
+DEFAULT_INDEX_ROOT = Path(__file__).parent / "pattern_index"
+DEFAULT_CHROMA_DIR = os.environ.get("SN_PATTERNS_CHROMA_DIR") or str(
+    Path.home() / ".sn_patterns_mcp" / "chroma"
+)
+
+
+def configure_logging() -> None:
+    """Configure stderr logging. STDOUT MUST stay clean for MCP JSON-RPC."""
+    level_name = os.environ.get("SN_PATTERNS_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    handler = logging.StreamHandler(stream=sys.stderr)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.setLevel(level)
+    # Remove any handler that might write to stdout
+    root.handlers = [handler]
+
+
+# ---------------------------------------------------------------------------
+# Tool descriptions — written for AI agent consumption (Claude / Codex).
+# Each description includes: what it does, when to use, what it returns,
+# and (where applicable) the relationship to other tools.
+# ---------------------------------------------------------------------------
+
+TOOL_DESCRIPTIONS: dict[str, str] = {
+    "pattern_analyze": (
+        "Get a structured step-by-step breakdown of an existing ServiceNow Discovery pattern. "
+        "Use this when the user names a known pattern (e.g. 'Apache HTTP Server On Unix' or a 32-char sys_id) "
+        "and wants to understand what it does. Returns: metadata (CI type, OS), every step's operation keyword "
+        "+ description, command/parse strategy details, variables read/written. "
+        "Falls back to metadata-only output if NDL is not cached locally."
+    ),
+    "pattern_resolve": (
+        "Resolve a pattern's full ecosystem: shared libraries it references, classifiers that route to it, "
+        "pre/post scripts attached to it, and a command inventory parsed from its NDL. "
+        "Use this when answering 'what runs alongside pattern X?' or 'what triggers pattern X?'. "
+        "Returns each section with a source tag (pdi, local, local-heuristic) so you can tell whether "
+        "a result is authoritative or a best-effort fallback. PDI failures are surfaced inline, not silenced."
+    ),
+    "pattern_debug": (
+        "Generate an operation-aware debug plan for a specific issue on a pattern (e.g. 'returns no CIs', "
+        "'authentication failing', 'WMI timeout'). Returns: sa_discovery_log query template, ecc_queue lookup "
+        "hints, per-operation failure modes from the closure registry, and pre/post script previews that may "
+        "explain the issue. Use this BEFORE asking the user to share logs — the output tells them what to fetch."
+    ),
+    "pattern_search": (
+        "Find ServiceNow Discovery patterns by intent. Uses semantic embeddings via ChromaDB when available, "
+        "falling back to substring search across the pattern manifest. "
+        "Use natural language: 'Tomcat on Linux', 'AWS S3 inventory', 'how does discovery find IIS'. "
+        "Returns top N matches with sys_id + CI type + operation fingerprint. The response header tells you which "
+        "backend was used so you know the result quality. Prefer this over asking the user to remember exact names."
+    ),
+    "ndl_explain": (
+        "Parse an arbitrary NDL text snippet (pattern, library, or single operation) and explain it in plain English. "
+        "Use when the user pastes NDL inline rather than referencing a known pattern. "
+        "Tries pattern → library → fragment in that order; surfaces the most informative parse error. "
+        "Hard cap: 1 MiB input. Does NOT require the input to be in the index."
+    ),
+    "pattern_compare": (
+        "Structural diff between two patterns by name or sys_id. Returns: differing CI types, OS family, "
+        "operation keywords (only-in-A, only-in-B, shared), variables, and shared library references. "
+        "Use this for 'how does Apache on Unix differ from Apache on Windows' or 'what's new in pattern v2 vs v1'."
+    ),
+    "pattern_validate": (
+        "Tier-1 local validation of raw NDL text. Checks syntax, parser/writer roundtrip agreement, metadata "
+        "completeness, refid library resolution, and variable read-before-write ordering. Returns severity-ranked "
+        "findings (ERROR/WARN/INFO; INFO suppressed unless verbose=true). Use this AFTER drafting NDL via "
+        "pattern_create or by hand, BEFORE attempting to upload to ServiceNow. Hard cap: 1 MiB input."
+    ),
+    "pattern_create": (
+        "Generate synthesis context for authoring a NEW ServiceNow Discovery pattern. Returns: 3 nearest-neighbor "
+        "existing patterns from the corpus (with full NDL snippets you can crib from), keyword-scored relevant "
+        "closure descriptors from the registry, and a skeleton pattern shape. "
+        "This tool does NOT generate NDL itself — it gives YOU (the AI agent) the structured context needed to "
+        "synthesize NDL. After drafting, call pattern_validate to check your work. "
+        "Inputs: intent (required, natural language), ci_type (optional cmdb_ci_*), os_family (optional cmdb_ci_*_server)."
+    ),
+    "pattern_test_compile": (
+        "Tier-2 PDI compile test. Uploads NDL to a sandbox sa_pattern row in ServiceNow, observes whether the "
+        "instance accepts or rejects it, then deletes the sandbox row. The pattern's name is rewritten to a "
+        "_sandbox_snmcp_ prefix so this NEVER touches real patterns. "
+        "Local Tier-1 validation runs first; if it fails, PDI is not contacted. "
+        "Use this AFTER pattern_validate passes, to catch server-side issues (CI type unknown, dictionary "
+        "violations, library refs that don't resolve in PDI). Requires PDI credentials. "
+        "Inputs: ndl (required), cleanup (default true; set false to retain sandbox row for inspection)."
+    ),
+    "pattern_diff_against_live": (
+        "Fetch the current PDI version of a pattern and diff it against your local NDL draft. Returns: "
+        "structural diff (operation keywords, variables, library refs added/removed) PLUS a textual unified "
+        "diff. Use BEFORE pushing edits to PDI to confirm exactly what changes. Does not modify anything. "
+        "Inputs: name_or_sys_id (required — pattern to fetch from PDI), local_ndl (required — your draft)."
+    ),
+    "oid_lookup": (
+        "Resolve an SNMP OID by dotted-decimal (e.g. 1.3.6.1.2.1.1.5.0) or by name (e.g. sysName) "
+        "into name/MIB/syntax/access/description. Walks up the OID tree to identify columnar instances "
+        "(e.g. 1.3.6.1.2.1.2.2.1.5.3 → ifSpeed for instance 3). For unknown OIDs in 1.3.6.1.4.1.*, "
+        "identifies the enterprise vendor. Use this to make SNMP-using patterns legible."
+    ),
+    "oid_walk_explain": (
+        "Show the structure under an OID prefix — what an SNMP walk would return. Lists every "
+        "child OID (recursive) with name, syntax, and table/columnar tags. Use this to understand "
+        "what data is in a table like ifTable or hrStorageTable before you query it."
+    ),
+    "oid_search": (
+        "Natural-language semantic search across the OID corpus (~hundreds of thousands of OIDs). "
+        "Use this when the user describes what they want rather than naming an OID — e.g. "
+        "'interface error counters', 'BGP session state', 'CPU temperature sensor'. "
+        "Tries ChromaDB semantic embeddings first; falls back to SQLite FTS5 keyword search."
+    ),
+    "pattern_snmp_audit": (
+        "For every run_snmp_* operation in a pattern, resolve the OID and report what it queries, "
+        "which MIB it's from, and which vendor (if enterprise-private). Surfaces vendor lock-in "
+        "and OID typos. Use this when reviewing or porting an SNMP discovery pattern. "
+        "Inputs: name_or_sys_id (required)."
+    ),
+    "pattern_lineage": (
+        "Trace the full dependency graph around a pattern: shared libraries it references "
+        "(recursive), extensions that graft into it, classifiers that route discovery to it, "
+        "pre/post scripts and the variables they inject via CTX.setAttribute, and provenance "
+        "of every variable the pattern reads (discovery context / process scope / pre-script / "
+        "set_attr / unknown). Use this when a user asks 'where does this pattern fit?' or "
+        "'what runs around it?' — gives the complete picture in one call."
+    ),
+    "pattern_data_sources": (
+        "For an existing pattern, list every external data point it touches: WMI classes "
+        "(with namespace + WQL), shell commands (Windows / Linux / F5 tmsh / Cisco CLI), "
+        "registry reads, SNMP OIDs (auto-resolved to MIB::name), file parses, HTTP/REST "
+        "endpoints, LDAP queries. Cross-references the bundled data-source catalog to show "
+        "what each data point typically populates in the CMDB. Use this to understand 'what "
+        "is this pattern actually collecting?' before modifying or troubleshooting."
+    ),
+    "pattern_data_sources_lookup": (
+        "Browse the data-source knowledge base — what data is available on a given target type "
+        "and how ServiceNow Discovery patterns typically ingest it. Use target='windows' / 'linux' "
+        "/ 'f5' / 'cisco-ios' to enumerate, or pass query=<keyword> to search across all. "
+        "Each entry shows the data point, access method (wmi/registry/command/snmp/rest), "
+        "the closure that ingests it, and the typical CI attribute it lands in."
+    ),
+}
+
+
+def _make_tool_list():
+    """Build MCP Tool definitions. Imported lazily inside run() because mcp.types
+    requires the mcp dependency which is not always installed in test environments."""
+    from mcp.types import Tool
+
+    def _input(properties: dict, required: list[str]) -> dict:
+        return {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
+
+    return [
+        Tool(name="pattern_analyze", description=TOOL_DESCRIPTIONS["pattern_analyze"],
+             inputSchema=_input({"name": {"type": "string", "description": "Pattern name or 32-char sys_id"}}, ["name"])),
+        Tool(name="pattern_resolve", description=TOOL_DESCRIPTIONS["pattern_resolve"],
+             inputSchema=_input({
+                 "name": {"type": "string", "description": "Pattern name or 32-char sys_id"},
+                 "depth": {"type": "string", "enum": ["shallow", "deep"], "default": "deep"},
+             }, ["name"])),
+        Tool(name="pattern_debug", description=TOOL_DESCRIPTIONS["pattern_debug"],
+             inputSchema=_input({
+                 "name": {"type": "string", "description": "Pattern name or 32-char sys_id"},
+                 "issue": {"type": "string", "description": "Free-form issue description, e.g. 'returns no CIs', 'auth failing'"},
+             }, ["name", "issue"])),
+        Tool(name="pattern_search", description=TOOL_DESCRIPTIONS["pattern_search"],
+             inputSchema=_input({
+                 "query": {"type": "string", "description": "Natural-language search query"},
+                 "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
+             }, ["query"])),
+        Tool(name="ndl_explain", description=TOOL_DESCRIPTIONS["ndl_explain"],
+             inputSchema=_input({"ndl": {"type": "string", "description": "Raw NDL text (max 1 MiB)"}}, ["ndl"])),
+        Tool(name="pattern_compare", description=TOOL_DESCRIPTIONS["pattern_compare"],
+             inputSchema=_input({
+                 "a": {"type": "string", "description": "First pattern name or sys_id"},
+                 "b": {"type": "string", "description": "Second pattern name or sys_id"},
+             }, ["a", "b"])),
+        Tool(name="pattern_validate", description=TOOL_DESCRIPTIONS["pattern_validate"],
+             inputSchema=_input({
+                 "ndl": {"type": "string", "description": "Raw NDL text to validate (max 1 MiB)"},
+                 "verbose": {"type": "boolean", "default": False, "description": "Include INFO findings (mostly unregistered closure names)"},
+             }, ["ndl"])),
+        Tool(name="pattern_create", description=TOOL_DESCRIPTIONS["pattern_create"],
+             inputSchema=_input({
+                 "intent": {"type": "string", "description": "Natural-language description of what the pattern should do"},
+                 "ci_type": {"type": "string", "description": "Target CI table (e.g. cmdb_ci_app_server_tomcat)"},
+                 "os_family": {"type": "string", "description": "OS family table (e.g. cmdb_ci_linux_server)"},
+             }, ["intent"])),
+        Tool(name="pattern_test_compile", description=TOOL_DESCRIPTIONS["pattern_test_compile"],
+             inputSchema=_input({
+                 "ndl": {"type": "string", "description": "Raw NDL text to compile-test (max 1 MiB)"},
+                 "cleanup": {"type": "boolean", "default": True, "description": "Delete the sandbox row after test (set false to retain for inspection)"},
+             }, ["ndl"])),
+        Tool(name="pattern_diff_against_live", description=TOOL_DESCRIPTIONS["pattern_diff_against_live"],
+             inputSchema=_input({
+                 "name_or_sys_id": {"type": "string", "description": "Pattern name or sys_id to fetch from PDI"},
+                 "local_ndl": {"type": "string", "description": "Your local NDL draft to compare against the PDI version"},
+             }, ["name_or_sys_id", "local_ndl"])),
+        Tool(name="oid_lookup", description=TOOL_DESCRIPTIONS["oid_lookup"],
+             inputSchema=_input({
+                 "oid_or_name": {"type": "string", "description": "Dotted-decimal OID, short name, or MIB::Name"},
+             }, ["oid_or_name"])),
+        Tool(name="oid_walk_explain", description=TOOL_DESCRIPTIONS["oid_walk_explain"],
+             inputSchema=_input({
+                 "prefix_oid": {"type": "string", "description": "OID prefix (a table OID, group OID, or any node)"},
+             }, ["prefix_oid"])),
+        Tool(name="oid_search", description=TOOL_DESCRIPTIONS["oid_search"],
+             inputSchema=_input({
+                 "query": {"type": "string", "description": "Natural-language description of what OID(s) you want"},
+                 "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
+             }, ["query"])),
+        Tool(name="pattern_snmp_audit", description=TOOL_DESCRIPTIONS["pattern_snmp_audit"],
+             inputSchema=_input({
+                 "name_or_sys_id": {"type": "string", "description": "Pattern name or 32-char sys_id"},
+             }, ["name_or_sys_id"])),
+        Tool(name="pattern_lineage", description=TOOL_DESCRIPTIONS["pattern_lineage"],
+             inputSchema=_input({
+                 "name_or_sys_id": {"type": "string", "description": "Pattern name or 32-char sys_id"},
+             }, ["name_or_sys_id"])),
+        Tool(name="pattern_data_sources", description=TOOL_DESCRIPTIONS["pattern_data_sources"],
+             inputSchema=_input({
+                 "name_or_sys_id": {"type": "string", "description": "Pattern name or 32-char sys_id"},
+             }, ["name_or_sys_id"])),
+        Tool(name="pattern_data_sources_lookup", description=TOOL_DESCRIPTIONS["pattern_data_sources_lookup"],
+             inputSchema=_input({
+                 "target": {"type": "string", "description": "Target family: windows, linux, f5, cisco-ios, esxi"},
+                 "query": {"type": "string", "description": "Keyword to search across all targets (use instead of or with target)"},
+             }, [])),
+    ]
+
+
+class SnPatternsServer:
+    def __init__(self) -> None:
+        index_root = os.environ.get("SN_PATTERNS_INDEX_ROOT") or str(DEFAULT_INDEX_ROOT)
+        self.index = PatternIndex.load(index_root)
+        self.chroma = ChromaPatternIndex(DEFAULT_CHROMA_DIR)
+        try:
+            self.pdi = try_create_client()
+        except PdiUnavailable as e:
+            log.info("PDI unavailable: %s", e)
+            self.pdi = None
+
+        # Debug mode: include full tracebacks in tool error responses
+        self._debug = os.environ.get("SN_PATTERNS_DEBUG", "").lower() in ("1", "true", "yes")
+
+        log.info(
+            "sn-patterns server initialized — index=%s patterns, chroma_dir=%s, pdi=%s, debug=%s",
+            self.index.size(), DEFAULT_CHROMA_DIR,
+            "active" if self.pdi else "offline (no creds in env)",
+            self._debug,
+        )
+
+    def _ctx(self) -> dict:
+        return {"index": self.index, "pdi": self.pdi, "chroma": self.chroma}
+
+    def _dispatch(self, name: str, arguments: dict) -> str:
+        """Route an MCP call to the right tool. Returns plain text on success or ERROR on failure."""
+        ctx = self._ctx()
+        if name == "pattern_analyze":
+            return ptools.pattern_analyze(arguments["name"], index=ctx["index"], pdi=ctx["pdi"])
+        if name == "pattern_resolve":
+            return ptools.pattern_resolve(
+                arguments["name"],
+                index=ctx["index"], pdi=ctx["pdi"],
+                depth=arguments.get("depth", "deep"),
+            )
+        if name == "pattern_debug":
+            return ptools.pattern_debug(
+                arguments["name"], arguments["issue"],
+                index=ctx["index"], pdi=ctx["pdi"],
+            )
+        if name == "pattern_search":
+            return ptools.pattern_search(
+                arguments["query"],
+                index=ctx["index"], chroma=ctx["chroma"],
+                limit=int(arguments.get("limit", 10)),
+            )
+        if name == "ndl_explain":
+            return ptools.ndl_explain(arguments["ndl"])
+        if name == "pattern_compare":
+            return ptools.pattern_compare(
+                arguments["a"], arguments["b"],
+                index=ctx["index"], pdi=ctx["pdi"],
+            )
+        if name == "pattern_validate":
+            return ptools.pattern_validate(
+                arguments["ndl"],
+                verbose=bool(arguments.get("verbose", False)),
+                index=ctx["index"],
+            )
+        if name == "pattern_create":
+            return ptools.pattern_create(
+                arguments["intent"],
+                ci_type=arguments.get("ci_type"),
+                os_family=arguments.get("os_family"),
+                index=ctx["index"], chroma=ctx["chroma"],
+            )
+        if name == "pattern_test_compile":
+            return ptools.pattern_test_compile(
+                arguments["ndl"],
+                pdi=ctx["pdi"],
+                cleanup=bool(arguments.get("cleanup", True)),
+            )
+        if name == "pattern_diff_against_live":
+            return ptools.pattern_diff_against_live(
+                arguments["name_or_sys_id"],
+                arguments["local_ndl"],
+                pdi=ctx["pdi"],
+            )
+        if name == "oid_lookup":
+            return ptools.oid_lookup(arguments["oid_or_name"])
+        if name == "oid_walk_explain":
+            return ptools.oid_walk_explain(arguments["prefix_oid"])
+        if name == "oid_search":
+            return ptools.oid_search(arguments["query"], limit=int(arguments.get("limit", 10)))
+        if name == "pattern_snmp_audit":
+            return ptools.pattern_snmp_audit(
+                arguments["name_or_sys_id"],
+                index=ctx["index"], pdi=ctx["pdi"],
+            )
+        if name == "pattern_lineage":
+            return ptools.pattern_lineage(
+                arguments["name_or_sys_id"],
+                index=ctx["index"], pdi=ctx["pdi"],
+            )
+        if name == "pattern_data_sources":
+            return ptools.pattern_data_sources(
+                arguments["name_or_sys_id"],
+                index=ctx["index"], pdi=ctx["pdi"],
+            )
+        if name == "pattern_data_sources_lookup":
+            return ptools.pattern_data_sources_lookup(
+                target=arguments.get("target"),
+                query=arguments.get("query"),
+            )
+        return f"ERROR: unknown tool: {name}"
+
+    async def run(self) -> None:
+        from mcp.server import Server
+        from mcp.server.stdio import stdio_server
+        from mcp.types import TextContent
+
+        server = Server("sn-patterns")
+        tool_list = _make_tool_list()
+
+        @server.list_tools()
+        async def list_tools():
+            return tool_list
+
+        @server.call_tool()
+        async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+            try:
+                out = self._dispatch(name, arguments)
+            except KeyError as e:
+                out = f"ERROR: missing required argument {e} for tool {name!r}"
+                log.warning("call_tool %s missing argument: %s", name, e)
+            except Exception as e:
+                log.exception("call_tool %s crashed", name)
+                out = f"ERROR: {name} raised {type(e).__name__}: {e}"
+                if self._debug:
+                    out += "\n\nTRACEBACK:\n" + traceback.format_exc()
+            return [TextContent(type="text", text=out)]
+
+        async with stdio_server() as (reader, writer):
+            await server.run(reader, writer, server.create_initialization_options())
+
+
+def main() -> None:
+    configure_logging()
+    asyncio.run(SnPatternsServer().run())
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,40 @@
+pattern {
+	metadata {
+		id = "apache_on_windows_fixture"
+		name = "Apache on Windows (fixture)"
+		description = "Fixture — WMI-based Apache discovery on Windows"
+		citype = "cmdb_ci_app_server_apache"
+		apply_to_os_types = "windows"
+	}
+
+	identification {
+		name = "Apache identification"
+		entrypoint {
+			type = "TCP"
+		}
+		find_process_strategy {
+			strategy = LISTENING_PORT
+		}
+		step {
+			name = "query httpd via WMI"
+			run_wmi_query_to_var {
+				query = constant {
+					value = "SELECT Name, ProcessId, CommandLine FROM Win32_Process WHERE Name='httpd.exe'"
+				}
+				variable_name = "$process_list"
+			}
+		}
+		step {
+			name = "read httpd.conf via SMB"
+			parse_file {
+				filePath = constant {
+					value = "C:/Apache24/conf/httpd.conf"
+				}
+				variable_name = "$conf"
+				parse_regex {
+					regex = "Listen\\s+(?<listen_port>[0-9]+)"
+				}
+			}
+		}
+	}
+}

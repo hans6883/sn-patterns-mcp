@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sn-patterns-mcp"
+version = "0.2.0"
+description = "ServiceNow Discovery pattern intelligence MCP server — Python NDL parser/writer + 8 MCP tools (read, search, validate, author)"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["servicenow", "discovery", "mcp", "ndl", "pattern", "ai-tools"]
+dependencies = [
+    "mcp>=1.2.0",
+    "chromadb>=0.5.0",
+    "sentence-transformers>=2.7.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pyflakes>=3.2",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+sn-patterns-mcp = "sn_patterns_mcp.server:main"
+
+[tool.setuptools.packages.find]
+include = ["sn_patterns_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "live_index: tests requiring the full 1227-pattern index built (skipped if absent)",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 110
+extend-exclude = [".venv", "build", "dist", "sn_patterns_mcp/pattern_index"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "RET",  # return hygiene
+]
+ignore = [
+    "E501",  # line length — handled by formatter
+    "B008",  # default arg in function call (deliberate for some closures)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401"]  # test fixtures may import without using
+"sn_patterns_mcp/closures/registry.py" = ["E501"]  # large data table
+"scripts/*" = ["E402"]  # imports after sys.path bootstrap are intentional
+
+[tool.coverage.run]
+source = ["sn_patterns_mcp"]
+omit = [
+    "sn_patterns_mcp/pattern_index/*",
+    "*/tests/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]

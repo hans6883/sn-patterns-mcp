@@ -1,0 +1,303 @@
+{
+  "target": "windows",
+  "description": "Windows server data sources commonly ingested by ServiceNow Discovery patterns. Covers WMI, registry, PowerShell, and performance counters. Most patterns target the root\\cimv2 namespace.",
+  "data_points": [
+    {
+      "name": "Win32_OperatingSystem",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Operating system metadata: caption, version, build, install date, last boot, total memory, hostname.",
+      "typical_ci": "cmdb_ci_win_server: os, os_version, os_service_pack, ram, last_discovered",
+      "example_query": "SELECT Caption, Version, BuildNumber, OSArchitecture, InstallDate, LastBootUpTime, TotalVisibleMemorySize, FreePhysicalMemory, CSName FROM Win32_OperatingSystem",
+      "fields": ["Caption", "Version", "BuildNumber", "OSArchitecture", "InstallDate", "LastBootUpTime", "TotalVisibleMemorySize", "FreePhysicalMemory", "CSName", "OSLanguage", "Manufacturer", "ServicePackMajorVersion"]
+    },
+    {
+      "name": "Win32_ComputerSystem",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Hardware/system identification: hostname, manufacturer, model, domain, NumberOfProcessors, TotalPhysicalMemory.",
+      "typical_ci": "cmdb_ci_win_server: name, manufacturer, model_id, dns_domain, cpu_count",
+      "example_query": "SELECT Name, Manufacturer, Model, Domain, DomainRole, NumberOfProcessors, NumberOfLogicalProcessors, TotalPhysicalMemory, SystemType, UserName, BootupState FROM Win32_ComputerSystem",
+      "fields": ["Name", "Manufacturer", "Model", "Domain", "DomainRole", "NumberOfProcessors", "NumberOfLogicalProcessors", "TotalPhysicalMemory", "SystemType", "UserName"]
+    },
+    {
+      "name": "Win32_BIOS",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "BIOS/firmware: serial number, manufacturer, version, release date.",
+      "typical_ci": "cmdb_ci_win_server: serial_number, bios_version, bios_release_date",
+      "example_query": "SELECT SerialNumber, Manufacturer, Version, ReleaseDate, SMBIOSBIOSVersion FROM Win32_BIOS",
+      "fields": ["SerialNumber", "Manufacturer", "Version", "ReleaseDate", "SMBIOSBIOSVersion"]
+    },
+    {
+      "name": "Win32_Processor",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "CPU details: name, family, manufacturer, MaxClockSpeed, NumberOfCores, NumberOfLogicalProcessors. One row per CPU.",
+      "typical_ci": "cmdb_ci_processor: name, manufacturer, speed, cores",
+      "example_query": "SELECT Name, Manufacturer, Family, MaxClockSpeed, NumberOfCores, NumberOfLogicalProcessors, ProcessorId, Architecture FROM Win32_Processor",
+      "fields": ["Name", "Manufacturer", "Family", "MaxClockSpeed", "NumberOfCores", "NumberOfLogicalProcessors", "ProcessorId", "Architecture"]
+    },
+    {
+      "name": "Win32_PhysicalMemory",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "RAM modules: capacity, speed, manufacturer, part number, slot. One row per DIMM.",
+      "typical_ci": "cmdb_ci_memory_module",
+      "example_query": "SELECT BankLabel, Capacity, Speed, Manufacturer, PartNumber, DeviceLocator, SerialNumber FROM Win32_PhysicalMemory",
+      "fields": ["BankLabel", "Capacity", "Speed", "Manufacturer", "PartNumber", "DeviceLocator", "SerialNumber"]
+    },
+    {
+      "name": "Win32_LogicalDisk",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Logical disks (volumes): drive letter, file system, size, free space.",
+      "typical_ci": "cmdb_ci_disk: name, file_system, size, free_space",
+      "example_query": "SELECT DeviceID, FileSystem, Size, FreeSpace, VolumeName, VolumeSerialNumber, DriveType FROM Win32_LogicalDisk WHERE DriveType=3",
+      "fields": ["DeviceID", "FileSystem", "Size", "FreeSpace", "VolumeName", "VolumeSerialNumber", "DriveType"]
+    },
+    {
+      "name": "Win32_DiskDrive",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Physical disks: model, serial, size, interface type, partitions.",
+      "typical_ci": "cmdb_ci_disk: model_id, serial_number, size_bytes",
+      "example_query": "SELECT Model, SerialNumber, Size, InterfaceType, MediaType, Partitions, DeviceID FROM Win32_DiskDrive",
+      "fields": ["Model", "SerialNumber", "Size", "InterfaceType", "MediaType", "Partitions", "DeviceID"]
+    },
+    {
+      "name": "Win32_NetworkAdapter",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Network interfaces: name, MAC, speed, manufacturer. Filter PhysicalAdapter=TRUE for real NICs.",
+      "typical_ci": "cmdb_ci_network_adapter: name, mac_address, speed",
+      "example_query": "SELECT Name, MACAddress, Speed, Manufacturer, NetConnectionID, AdapterType FROM Win32_NetworkAdapter WHERE PhysicalAdapter=TRUE",
+      "fields": ["Name", "MACAddress", "Speed", "Manufacturer", "NetConnectionID", "AdapterType"]
+    },
+    {
+      "name": "Win32_NetworkAdapterConfiguration",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Network adapter IP config: IPAddress, IPSubnet, DefaultIPGateway, DNSServerSearchOrder, DHCPEnabled.",
+      "typical_ci": "cmdb_ci_ip_address, cmdb_ci_network_adapter (ip_address, subnet)",
+      "example_query": "SELECT Description, MACAddress, IPAddress, IPSubnet, DefaultIPGateway, DNSServerSearchOrder, DHCPEnabled FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled=TRUE",
+      "fields": ["Description", "MACAddress", "IPAddress", "IPSubnet", "DefaultIPGateway", "DNSServerSearchOrder", "DHCPEnabled", "IPEnabled"]
+    },
+    {
+      "name": "Win32_Service",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Windows services: name, display name, state (Running/Stopped), start mode, run-as account, executable path.",
+      "typical_ci": "cmdb_ci_win_service: name, display_name, status, start_mode",
+      "example_query": "SELECT Name, DisplayName, State, StartMode, StartName, PathName, ProcessId, Status FROM Win32_Service",
+      "fields": ["Name", "DisplayName", "State", "StartMode", "StartName", "PathName", "ProcessId", "Status", "Description"]
+    },
+    {
+      "name": "Win32_Process",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Running processes: name, PID, command line, working set size, creation date.",
+      "typical_ci": "cmdb_running_process: name, pid, command_line",
+      "example_query": "SELECT Name, ProcessId, ParentProcessId, CommandLine, ExecutablePath, WorkingSetSize, CreationDate FROM Win32_Process",
+      "fields": ["Name", "ProcessId", "ParentProcessId", "CommandLine", "ExecutablePath", "WorkingSetSize", "CreationDate"]
+    },
+    {
+      "name": "Win32_Product",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Installed software (MSI-installed only — incomplete; use registry path for full inventory). NAME/VERSION/VENDOR.",
+      "typical_ci": "cmdb_ci_spkg: name, version, vendor (Software Asset Management)",
+      "example_query": "SELECT Name, Version, Vendor, InstallDate, IdentifyingNumber FROM Win32_Product",
+      "fields": ["Name", "Version", "Vendor", "InstallDate", "IdentifyingNumber"]
+    },
+    {
+      "name": "Win32_QuickFixEngineering",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Installed Windows Updates (KB hotfixes).",
+      "typical_ci": "cmdb_ci_patches",
+      "example_query": "SELECT HotFixID, Description, InstalledOn FROM Win32_QuickFixEngineering",
+      "fields": ["HotFixID", "Description", "InstalledOn"]
+    },
+    {
+      "name": "Win32_Share",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "SMB shares.",
+      "typical_ci": "cmdb_ci_smb_share",
+      "example_query": "SELECT Name, Path, Description, Type FROM Win32_Share",
+      "fields": ["Name", "Path", "Description", "Type"]
+    },
+    {
+      "name": "MSCluster_Cluster",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Windows Failover Cluster info. Namespace: root\\MSCluster.",
+      "typical_ci": "cmdb_ci_cluster: name",
+      "example_query": "SELECT Name, FQDN FROM MSCluster_Cluster",
+      "fields": ["Name", "FQDN"]
+    },
+    {
+      "name": "MSCluster_Node",
+      "access_method": "wmi",
+      "closure": "run_wmi_query_to_var",
+      "description": "Cluster nodes. Namespace: root\\MSCluster.",
+      "typical_ci": "cmdb_ci_cluster_node",
+      "example_query": "SELECT Name, NodeName, State FROM MSCluster_Node",
+      "fields": ["Name", "NodeName", "State"]
+    },
+    {
+      "name": "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+      "access_method": "registry",
+      "closure": "find_registry_val_to_var",
+      "description": "OS version registry — used as a fallback when WMI is restricted. ProductName, CurrentVersion, BuildLab, ReleaseId, EditionID.",
+      "typical_ci": "cmdb_ci_win_server.os_version",
+      "example_query": "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProductName",
+      "fields": ["ProductName", "CurrentVersion", "BuildLab", "ReleaseId", "EditionID", "InstallDate"]
+    },
+    {
+      "name": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+      "access_method": "registry",
+      "closure": "find_registry_val_to_var",
+      "description": "Installed software inventory (32-bit + 64-bit). More complete than Win32_Product. Iterate subkeys; each has DisplayName, DisplayVersion, Publisher, InstallDate.",
+      "typical_ci": "cmdb_ci_spkg",
+      "example_query": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* (also \\Wow6432Node\\...)",
+      "fields": ["DisplayName", "DisplayVersion", "Publisher", "InstallDate", "InstallLocation"]
+    },
+    {
+      "name": "HKLM\\SYSTEM\\CurrentControlSet\\Services",
+      "access_method": "registry",
+      "closure": "find_registry_val_to_var",
+      "description": "Service definitions (more detail than Win32_Service for ImagePath, dependencies).",
+      "typical_ci": "cmdb_ci_win_service",
+      "example_query": "HKLM\\SYSTEM\\CurrentControlSet\\Services\\<service_name>\\ImagePath",
+      "fields": ["ImagePath", "Start", "Type", "DependOnService", "Description"]
+    },
+    {
+      "name": "HKLM\\SOFTWARE\\Microsoft\\Microsoft SQL Server\\Instance Names\\SQL",
+      "access_method": "registry",
+      "closure": "find_registry_val_to_var",
+      "description": "SQL Server instance names — used by SQL discovery patterns to enumerate installed instances.",
+      "typical_ci": "cmdb_ci_db_mssql_instance",
+      "example_query": "HKLM\\SOFTWARE\\Microsoft\\Microsoft SQL Server\\Instance Names\\SQL\\<InstanceName>",
+      "fields": []
+    },
+    {
+      "name": "Get-ComputerInfo",
+      "access_method": "powershell",
+      "closure": "runcmd_to_var",
+      "description": "Modern PowerShell cmdlet replacing many WMI queries. Returns OS, BIOS, CS, hardware in one call.",
+      "typical_ci": "cmdb_ci_win_server (multiple fields)",
+      "example_query": "powershell -Command \"Get-ComputerInfo | Select-Object CsName,OsName,OsVersion,WindowsVersion,WindowsBuildLabEx,CsManufacturer,CsModel,BiosSeralNumber,CsTotalPhysicalMemory\"",
+      "fields": ["CsName", "OsName", "OsVersion", "WindowsVersion", "WindowsBuildLabEx", "CsManufacturer", "CsModel", "BiosSeralNumber", "CsTotalPhysicalMemory"]
+    },
+    {
+      "name": "Get-Service",
+      "access_method": "powershell",
+      "closure": "runcmd_to_var",
+      "description": "PowerShell service enumeration. Lighter than WMI for simple status checks.",
+      "typical_ci": "cmdb_ci_win_service",
+      "example_query": "powershell -Command \"Get-Service | Select-Object Name,DisplayName,Status,StartType\"",
+      "fields": ["Name", "DisplayName", "Status", "StartType"]
+    },
+    {
+      "name": "Get-NetAdapter",
+      "access_method": "powershell",
+      "closure": "runcmd_to_var",
+      "description": "PowerShell network adapter info — replaces Win32_NetworkAdapter for Server 2012+.",
+      "typical_ci": "cmdb_ci_network_adapter",
+      "example_query": "powershell -Command \"Get-NetAdapter | Select-Object Name,InterfaceDescription,Status,MacAddress,LinkSpeed\"",
+      "fields": ["Name", "InterfaceDescription", "Status", "MacAddress", "LinkSpeed"]
+    },
+    {
+      "name": "Get-NetIPAddress",
+      "access_method": "powershell",
+      "closure": "runcmd_to_var",
+      "description": "PowerShell IP address listing.",
+      "typical_ci": "cmdb_ci_ip_address",
+      "example_query": "powershell -Command \"Get-NetIPAddress | Where-Object AddressFamily -eq IPv4 | Select-Object IPAddress,PrefixLength,InterfaceAlias\"",
+      "fields": ["IPAddress", "PrefixLength", "InterfaceAlias"]
+    },
+    {
+      "name": "Get-Process",
+      "access_method": "powershell",
+      "closure": "runcmd_to_var",
+      "description": "PowerShell process listing. Pair with -IncludeUserName for run-as info.",
+      "typical_ci": "cmdb_running_process",
+      "example_query": "powershell -Command \"Get-Process | Select-Object Name,Id,Path,Company,ProductVersion\"",
+      "fields": ["Name", "Id", "Path", "Company", "ProductVersion"]
+    },
+    {
+      "name": "Get-WindowsFeature",
+      "access_method": "powershell",
+      "closure": "runcmd_to_var",
+      "description": "Server roles + features inventory (Server 2012+).",
+      "typical_ci": "cmdb_ci_appl",
+      "example_query": "powershell -Command \"Get-WindowsFeature | Where-Object InstallState -eq Installed | Select-Object Name,DisplayName\"",
+      "fields": ["Name", "DisplayName", "InstallState"]
+    },
+    {
+      "name": "Get-Hotfix",
+      "access_method": "powershell",
+      "closure": "runcmd_to_var",
+      "description": "Installed Windows updates. PowerShell wrapper around Win32_QuickFixEngineering.",
+      "typical_ci": "cmdb_ci_patches",
+      "example_query": "powershell -Command \"Get-Hotfix | Select-Object HotFixID,Description,InstalledOn\"",
+      "fields": ["HotFixID", "Description", "InstalledOn"]
+    },
+    {
+      "name": "ipconfig /all",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Classic IP config — fallback when PowerShell/WMI restricted.",
+      "typical_ci": "cmdb_ci_ip_address",
+      "example_query": "ipconfig /all",
+      "fields": []
+    },
+    {
+      "name": "systeminfo",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Comprehensive system info text dump. Often used as a fallback when WMI is denied.",
+      "typical_ci": "cmdb_ci_win_server (multiple)",
+      "example_query": "systeminfo",
+      "fields": ["Host Name", "OS Name", "OS Version", "System Manufacturer", "System Model", "BIOS Version", "Total Physical Memory"]
+    },
+    {
+      "name": "tasklist /v",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Process listing with run-as user.",
+      "typical_ci": "cmdb_running_process",
+      "example_query": "tasklist /v /fo csv",
+      "fields": []
+    },
+    {
+      "name": "netstat -ano",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "TCP/UDP listening + established ports with PIDs. Used to map services to processes.",
+      "typical_ci": "cmdb_ci_endpoint_tcp / udp",
+      "example_query": "netstat -ano",
+      "fields": []
+    },
+    {
+      "name": "\\Processor(_Total)\\% Processor Time",
+      "access_method": "perf_counter",
+      "closure": "runcmd_to_var",
+      "description": "CPU utilization performance counter.",
+      "typical_ci": "cmdb_ci_win_server.cpu_utilization",
+      "example_query": "typeperf \"\\Processor(_Total)\\% Processor Time\" -sc 1",
+      "fields": []
+    },
+    {
+      "name": "\\Memory\\Available MBytes",
+      "access_method": "perf_counter",
+      "closure": "runcmd_to_var",
+      "description": "Free memory in MB.",
+      "typical_ci": "cmdb_ci_win_server.memory_free",
+      "example_query": "typeperf \"\\Memory\\Available MBytes\" -sc 1",
+      "fields": []
+    }
+  ]
+}

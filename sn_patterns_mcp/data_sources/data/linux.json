@@ -1,0 +1,159 @@
+{
+  "target": "linux",
+  "description": "Linux server data sources. Three primary access methods: shell commands over SSH, /proc + /sys virtual filesystems, /etc config files.",
+  "data_points": [
+    {
+      "name": "uname -a",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Kernel name, hostname, kernel release, kernel version, machine arch, OS.",
+      "typical_ci": "cmdb_ci_linux_server: os, os_version, dns_domain",
+      "example_query": "uname -a",
+      "fields": []
+    },
+    {
+      "name": "/etc/os-release",
+      "access_method": "file",
+      "closure": "parse_text_file_to_var",
+      "description": "Modern (systemd-era) OS distribution identifier. Replaces /etc/redhat-release, /etc/lsb-release, etc.",
+      "typical_ci": "cmdb_ci_linux_server: os_version, vendor",
+      "example_query": "cat /etc/os-release",
+      "fields": ["NAME", "VERSION", "ID", "ID_LIKE", "PRETTY_NAME", "VERSION_ID"]
+    },
+    {
+      "name": "/proc/cpuinfo",
+      "access_method": "file",
+      "closure": "parse_text_file_to_var",
+      "description": "CPU details: model, cores, MHz, cache size. One block per logical CPU.",
+      "typical_ci": "cmdb_ci_processor",
+      "example_query": "cat /proc/cpuinfo",
+      "fields": ["model name", "cpu MHz", "cache size", "physical id", "core id", "siblings", "cpu cores"]
+    },
+    {
+      "name": "/proc/meminfo",
+      "access_method": "file",
+      "closure": "parse_text_file_to_var",
+      "description": "Memory totals + utilization.",
+      "typical_ci": "cmdb_ci_linux_server: ram, memory_free",
+      "example_query": "cat /proc/meminfo",
+      "fields": ["MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached", "SwapTotal", "SwapFree"]
+    },
+    {
+      "name": "/etc/hostname",
+      "access_method": "file",
+      "closure": "parse_text_file_to_var",
+      "description": "Configured hostname.",
+      "typical_ci": "cmdb_ci_linux_server.name",
+      "example_query": "cat /etc/hostname",
+      "fields": []
+    },
+    {
+      "name": "ip addr show",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Modern network interface listing. Replaces deprecated `ifconfig`.",
+      "typical_ci": "cmdb_ci_network_adapter, cmdb_ci_ip_address",
+      "example_query": "ip -o -4 addr show",
+      "fields": []
+    },
+    {
+      "name": "ip route show",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Routing table — used to find default gateway.",
+      "typical_ci": "cmdb_ci_linux_server.default_gateway",
+      "example_query": "ip route show default",
+      "fields": []
+    },
+    {
+      "name": "ps -ef",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Running process list — typically used inside find_process_to_var or filtered for specific apps.",
+      "typical_ci": "cmdb_running_process",
+      "example_query": "ps -ef",
+      "fields": ["UID", "PID", "PPID", "C", "STIME", "TTY", "TIME", "CMD"]
+    },
+    {
+      "name": "systemctl list-units --type=service",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "systemd services + state. Replaces `service --status-all`.",
+      "typical_ci": "cmdb_ci_service",
+      "example_query": "systemctl list-units --type=service --no-pager --no-legend",
+      "fields": []
+    },
+    {
+      "name": "df -h",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Disk usage by mount point.",
+      "typical_ci": "cmdb_ci_disk_partition",
+      "example_query": "df -hP",
+      "fields": ["Filesystem", "Size", "Used", "Avail", "Use%", "Mounted on"]
+    },
+    {
+      "name": "/etc/fstab",
+      "access_method": "file",
+      "closure": "parse_text_file_to_var",
+      "description": "Persistent filesystem mounts (NFS, local disks, etc).",
+      "typical_ci": "cmdb_ci_disk_partition (mount config)",
+      "example_query": "cat /etc/fstab",
+      "fields": []
+    },
+    {
+      "name": "rpm -qa",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Installed RPM packages (Red Hat / SUSE family).",
+      "typical_ci": "cmdb_ci_spkg",
+      "example_query": "rpm -qa --queryformat '%{NAME}|%{VERSION}|%{RELEASE}|%{VENDOR}|%{INSTALLTIME:date}\\n'",
+      "fields": ["NAME", "VERSION", "RELEASE", "VENDOR", "INSTALLTIME"]
+    },
+    {
+      "name": "dpkg -l",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Installed Debian/Ubuntu packages.",
+      "typical_ci": "cmdb_ci_spkg",
+      "example_query": "dpkg-query -W -f='${Package}|${Version}|${Maintainer}\\n'",
+      "fields": ["Package", "Version", "Maintainer"]
+    },
+    {
+      "name": "ss -tlnp",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Listening TCP ports + owning process. Replaces `netstat`.",
+      "typical_ci": "cmdb_ci_endpoint_tcp",
+      "example_query": "ss -tlnp",
+      "fields": []
+    },
+    {
+      "name": "/etc/ssh/sshd_config",
+      "access_method": "file",
+      "closure": "parse_text_file_to_var",
+      "description": "SSH daemon configuration — port, allowed users, key auth settings.",
+      "typical_ci": "cmdb_ci_appl (SSH service config)",
+      "example_query": "cat /etc/ssh/sshd_config",
+      "fields": ["Port", "PermitRootLogin", "PasswordAuthentication"]
+    },
+    {
+      "name": "dmidecode -t system",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "DMI/SMBIOS hardware: manufacturer, product name, serial. Requires root.",
+      "typical_ci": "cmdb_ci_linux_server: serial_number, manufacturer, model_id",
+      "example_query": "dmidecode -t system",
+      "fields": ["Manufacturer", "Product Name", "Serial Number", "UUID"]
+    },
+    {
+      "name": "lsblk",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Block device tree (disks, partitions, LVM).",
+      "typical_ci": "cmdb_ci_disk",
+      "example_query": "lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,MODEL,SERIAL",
+      "fields": ["NAME", "SIZE", "TYPE", "MOUNTPOINT", "MODEL", "SERIAL"]
+    }
+  ]
+}

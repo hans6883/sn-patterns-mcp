@@ -1,0 +1,168 @@
+{
+  "target": "cisco-ios",
+  "description": "Cisco IOS / IOS-XE / NX-OS data points. Three primary access methods: SSH show commands, SNMP CISCO-* MIBs, and NETCONF/RESTCONF on newer platforms.",
+  "data_points": [
+    {
+      "name": "show version",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "IOS version, hostname, uptime, image file, model, serial. Cornerstone command for any Cisco discovery.",
+      "typical_ci": "cmdb_ci_ip_router / cmdb_ci_ip_switch: name, os_version, model_id, serial_number, uptime",
+      "example_query": "show version",
+      "fields": ["IOS Version", "Hostname", "Uptime", "Image File", "Model", "Serial"]
+    },
+    {
+      "name": "show inventory",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Hardware inventory — chassis, modules, line cards, transceivers. Each row has Name/Description/PID/VID/SN.",
+      "typical_ci": "cmdb_ci_chassis, cmdb_ci_lan_module",
+      "example_query": "show inventory",
+      "fields": ["NAME", "DESCR", "PID", "VID", "SN"]
+    },
+    {
+      "name": "show interfaces",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "All interfaces with status, MAC, IP, MTU, bandwidth, input/output errors.",
+      "typical_ci": "cmdb_ci_network_adapter",
+      "example_query": "show interfaces",
+      "fields": []
+    },
+    {
+      "name": "show ip interface brief",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Interface IP summary — fast scan.",
+      "typical_ci": "cmdb_ci_ip_address",
+      "example_query": "show ip interface brief",
+      "fields": ["Interface", "IP-Address", "OK?", "Method", "Status", "Protocol"]
+    },
+    {
+      "name": "show running-config",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Complete running configuration — used for config archival and detailed feature discovery.",
+      "typical_ci": "cmdb_ci_ip_router (full config)",
+      "example_query": "show running-config",
+      "fields": []
+    },
+    {
+      "name": "show vlan brief",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "VLAN to port mapping (Layer 2 switches).",
+      "typical_ci": "cmdb_ci_vlan",
+      "example_query": "show vlan brief",
+      "fields": ["VLAN", "Name", "Status", "Ports"]
+    },
+    {
+      "name": "show cdp neighbors detail",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Cisco Discovery Protocol neighbor info — used for L2 topology discovery (peer device, port, IP, platform).",
+      "typical_ci": "cmdb_rel_l2_neighbor",
+      "example_query": "show cdp neighbors detail",
+      "fields": ["Device ID", "IP address", "Platform", "Capabilities", "Interface", "Port ID", "Version"]
+    },
+    {
+      "name": "show lldp neighbors detail",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "LLDP neighbor info — vendor-neutral L2 discovery.",
+      "typical_ci": "cmdb_rel_l2_neighbor",
+      "example_query": "show lldp neighbors detail",
+      "fields": ["System Name", "Chassis id", "Port id", "System Description"]
+    },
+    {
+      "name": "show ip route",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Routing table — used for L3 topology, default gateway, BGP/OSPF peers.",
+      "typical_ci": "cmdb_ci_route",
+      "example_query": "show ip route",
+      "fields": []
+    },
+    {
+      "name": "show ip arp",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "ARP table — IP↔MAC mappings learned by the device.",
+      "typical_ci": "discovery_classify (used for finding endpoints)",
+      "example_query": "show ip arp",
+      "fields": ["Protocol", "Address", "Age", "Hardware Addr", "Type", "Interface"]
+    },
+    {
+      "name": "show mac address-table",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "Switch CAM table — port↔MAC bindings.",
+      "typical_ci": "cmdb_rel_l2_mac_port",
+      "example_query": "show mac address-table",
+      "fields": ["Vlan", "Mac Address", "Type", "Ports"]
+    },
+    {
+      "name": "show vrf",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "VRF instances — for MPLS/segmented networks.",
+      "typical_ci": "cmdb_ci_vrf",
+      "example_query": "show vrf",
+      "fields": ["Name", "Default RD", "Protocols", "Interfaces"]
+    },
+    {
+      "name": "show ip bgp summary",
+      "access_method": "command",
+      "closure": "runcmd_to_var",
+      "description": "BGP neighbor state + AS number for each peer.",
+      "typical_ci": "cmdb_ci_bgp_peer",
+      "example_query": "show ip bgp summary",
+      "fields": ["Neighbor", "V", "AS", "MsgRcvd", "MsgSent", "Up/Down", "State/PfxRcd"]
+    },
+    {
+      "name": "SNMPv2-MIB::sysDescr",
+      "access_method": "snmp",
+      "closure": "run_snmp_to_var",
+      "description": "Generic system description — first thing any SNMP-only Cisco discovery hits. Format: 'Cisco IOS Software, ...'.",
+      "typical_ci": "cmdb_ci_ip_router.os_version",
+      "example_query": "1.3.6.1.2.1.1.1.0",
+      "fields": []
+    },
+    {
+      "name": "ENTITY-MIB::entPhysicalTable",
+      "access_method": "snmp",
+      "closure": "run_snmp_to_var",
+      "description": "Hardware tree (chassis → slots → modules → ports). Vendor-neutral inventory.",
+      "typical_ci": "cmdb_ci_chassis, cmdb_ci_lan_module",
+      "example_query": "1.3.6.1.2.1.47.1.1.1",
+      "fields": ["entPhysicalDescr", "entPhysicalSerialNum", "entPhysicalModelName", "entPhysicalContainedIn", "entPhysicalClass"]
+    },
+    {
+      "name": "CISCO-CDP-MIB::cdpCacheTable",
+      "access_method": "snmp",
+      "closure": "run_snmp_to_var",
+      "description": "CDP neighbor data via SNMP. OID 1.3.6.1.4.1.9.9.23.1.2.1.",
+      "typical_ci": "cmdb_rel_l2_neighbor",
+      "example_query": "1.3.6.1.4.1.9.9.23.1.2.1",
+      "fields": ["cdpCacheDeviceId", "cdpCacheDevicePort", "cdpCacheAddress", "cdpCachePlatform"]
+    },
+    {
+      "name": "CISCO-PROCESS-MIB::cpmCPUTotal5minRev",
+      "access_method": "snmp",
+      "closure": "run_snmp_to_var",
+      "description": "5-minute CPU utilization average — health metric.",
+      "typical_ci": "cmdb_ci_ip_router.cpu_utilization",
+      "example_query": "1.3.6.1.4.1.9.9.109.1.1.1.1.8",
+      "fields": []
+    },
+    {
+      "name": "CISCO-MEMORY-POOL-MIB::ciscoMemoryPoolTable",
+      "access_method": "snmp",
+      "closure": "run_snmp_to_var",
+      "description": "Memory pool utilization (IOS uses processor + I/O pools).",
+      "typical_ci": "cmdb_ci_ip_router.memory_used",
+      "example_query": "1.3.6.1.4.1.9.9.48.1.1.1",
+      "fields": ["ciscoMemoryPoolUsed", "ciscoMemoryPoolFree", "ciscoMemoryPoolName"]
+    }
+  ]
+}
