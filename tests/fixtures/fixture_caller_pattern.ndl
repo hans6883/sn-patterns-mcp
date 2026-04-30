@@ -1,0 +1,36 @@
+pattern {
+	metadata {
+		id = "fixture_caller_0000000000000002"
+		name = "Fixture - Caller Pattern"
+		description = "Calls the fixture library via ref"
+		citype = "cmdb_ci_win_server"
+	}
+	identification {
+		name = "Caller identification"
+		entrypoint {
+			type = "TCP"
+		}
+		find_process_strategy {
+			strategy = LISTENING_PORT
+		}
+		step {
+			name = "Set hostname"
+			set_attr {
+				"newHostname"
+				"testhost"
+			}
+		}
+		step {
+			name = "Call general-vars library"
+			ref {refid = "fixture_lib_gen_vars_0000000000000001"}
+		}
+		step {
+			name = "Use a var produced by the library (guarded)"
+			if {
+				condition = is_not_empty {get_attr {"MSCluster_Cluster"}}
+				on_true = nop {}
+				on_false = nop {}
+			}
+		}
+	}
+}

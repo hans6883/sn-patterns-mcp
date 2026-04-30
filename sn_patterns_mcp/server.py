@@ -20,6 +20,8 @@ from pathlib import Path
 
 from sn_patterns_mcp import tools as ptools
 from sn_patterns_mcp.chroma_index import ChromaPatternIndex
+from sn_patterns_mcp.drafts import DRAFTS
+from sn_patterns_mcp.drafts import mcp_tools as dtools
 from sn_patterns_mcp.pattern_index import PatternIndex
 from sn_patterns_mcp.pdi_client import PdiUnavailable, try_create_client
 
@@ -163,6 +165,56 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Each entry shows the data point, access method (wmi/registry/command/snmp/rest), "
         "the closure that ingests it, and the typical CI attribute it lands in."
     ),
+    "pattern_open_draft": (
+        "Open an existing pattern (or library) as a mutable Draft for surgical editing. "
+        "Returns a draft_id you pass to all subsequent draft_* calls in this session. "
+        "Use this as the FIRST step when the user wants to clone-and-customize a pattern, "
+        "wrap a step in a guard, fix a hardcoded path, or otherwise mutate a shipping pattern. "
+        "The draft holds a mutable AST; edits do not affect the source until draft_finalize."
+    ),
+    "draft_locate_steps": (
+        "Find steps in a draft matching a predicate. Returns opaque locators (draft_id + step_uid) "
+        "stable across structural mutations. Predicate fields: name_contains, name_equals, "
+        "closure_keyword (e.g. 'run_wmi_query_to_var', 'ref'), ref_to_refid (sys_id of target library), "
+        "attr_eq=[name,value], attr_contains=[name,substr], section ('identification' | 'connection' | "
+        "'extension' | 'library'). Multiple fields combine with AND. Use this BEFORE every edit op "
+        "to obtain target locators."
+    ),
+    "draft_apply": (
+        "Apply an edit op to a draft. Op names: clone_library, wrap_in_guard, insert_step_before, "
+        "insert_step_after, redirect_ref, modify_closure_attr, remove_step. Each op validates before "
+        "mutating; failures return ok=false with a list of issues (each with a code, message, and "
+        "sometimes a suggested_fix the agent can apply). Recipe-based inserts: pass {recipe: <name>, "
+        "closure: <keyword>, params: {...}} instead of ndl_fragment to use a curated, tested NDL "
+        "template attached to the closure (call closure_capability to discover available recipes)."
+    ),
+    "draft_validate": (
+        "Run all validators on a draft: Tier-1 syntax + roundtrip; cross-draft var-flow (parent reads "
+        "vs child exports for clone-then-redirect workflows). Returns severity-ranked issues. Run this "
+        "AFTER each significant edit and BEFORE finalize. Cross-draft check is the safety net for the "
+        "clone-and-edit workflow: if the cloned library no longer writes a var the parent still reads, "
+        "this is where it surfaces."
+    ),
+    "draft_diff": (
+        "Unified textual diff: original source NDL vs current draft tree. Use to review your changes "
+        "before finalizing. Returns the diff verbatim (capped at 8000 chars)."
+    ),
+    "draft_finalize": (
+        "Materialize the draft. Modes: 'serialize_only' (return current NDL as text), 'sandbox' "
+        "(create new sa_pattern row in PDI with _sandbox_snmcp_ prefix — same safety as "
+        "pattern_test_compile), 'push_live' (NOT IMPLEMENTED — intentional safety guard). For "
+        "production deploys: serialize_only + manual review + manual upload."
+    ),
+    "draft_abandon": (
+        "Drop a draft and all its child drafts from the in-memory store. Use when the user gives up "
+        "on the workflow or starts over. Drafts are also dropped on server restart."
+    ),
+    "closure_capability": (
+        "Describe a closure: required inputs, outputs, semantics, and the list of recipes addressing "
+        "its known limitations. Recipes are tested NDL fragments parameterized for re-use. Use this "
+        "WHEN you need to know how to work around a closure-level gap (e.g. run_wmi_query_to_var "
+        "doesn't validate namespace existence — there's a recipe for that)."
+    ),
 }
 
 
@@ -250,6 +302,40 @@ def _make_tool_list():
                  "target": {"type": "string", "description": "Target family: windows, linux, f5, cisco-ios, esxi"},
                  "query": {"type": "string", "description": "Keyword to search across all targets (use instead of or with target)"},
              }, [])),
+        # ----- Draft / surgical-edit harness tools -----
+        Tool(name="pattern_open_draft", description=TOOL_DESCRIPTIONS["pattern_open_draft"],
+             inputSchema=_input({
+                 "name_or_sys_id": {"type": "string", "description": "Pattern or library name / 32-char sys_id"},
+             }, ["name_or_sys_id"])),
+        Tool(name="draft_locate_steps", description=TOOL_DESCRIPTIONS["draft_locate_steps"],
+             inputSchema=_input({
+                 "draft_id": {"type": "string", "description": "Draft id from pattern_open_draft"},
+                 "predicate": {
+                     "type": "object",
+                     "description": "Predicate fields (all optional, ANDed). See tool description for fields.",
+                     "additionalProperties": True,
+                 },
+                 "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 500},
+             }, ["draft_id", "predicate"])),
+        Tool(name="draft_apply", description=TOOL_DESCRIPTIONS["draft_apply"],
+             inputSchema=_input({
+                 "draft_id": {"type": "string"},
+                 "op_name": {"type": "string", "description": "One of: clone_library, wrap_in_guard, insert_step_before, insert_step_after, redirect_ref, modify_closure_attr, remove_step"},
+                 "params": {"type": "object", "description": "Op-specific parameters", "additionalProperties": True},
+             }, ["draft_id", "op_name", "params"])),
+        Tool(name="draft_validate", description=TOOL_DESCRIPTIONS["draft_validate"],
+             inputSchema=_input({"draft_id": {"type": "string"}}, ["draft_id"])),
+        Tool(name="draft_diff", description=TOOL_DESCRIPTIONS["draft_diff"],
+             inputSchema=_input({"draft_id": {"type": "string"}}, ["draft_id"])),
+        Tool(name="draft_finalize", description=TOOL_DESCRIPTIONS["draft_finalize"],
+             inputSchema=_input({
+                 "draft_id": {"type": "string"},
+                 "mode": {"type": "string", "enum": ["serialize_only", "sandbox", "push_live"], "default": "serialize_only"},
+             }, ["draft_id"])),
+        Tool(name="draft_abandon", description=TOOL_DESCRIPTIONS["draft_abandon"],
+             inputSchema=_input({"draft_id": {"type": "string"}}, ["draft_id"])),
+        Tool(name="closure_capability", description=TOOL_DESCRIPTIONS["closure_capability"],
+             inputSchema=_input({"closure_keyword": {"type": "string"}}, ["closure_keyword"])),
     ]
 
 
@@ -263,6 +349,11 @@ class SnPatternsServer:
         except PdiUnavailable as e:
             log.info("PDI unavailable: %s", e)
             self.pdi = None
+
+        # Wire the global draft store with index/pdi so CloneLibrary can resolve sys_ids.
+        self.drafts = DRAFTS
+        self.drafts.index = self.index  # type: ignore[attr-defined]
+        self.drafts.pdi = self.pdi      # type: ignore[attr-defined]
 
         # Debug mode: include full tracebacks in tool error responses
         self._debug = os.environ.get("SN_PATTERNS_DEBUG", "").lower() in ("1", "true", "yes")
@@ -357,6 +448,40 @@ class SnPatternsServer:
                 target=arguments.get("target"),
                 query=arguments.get("query"),
             )
+        # ----- Draft / surgical-edit harness -----
+        if name == "pattern_open_draft":
+            return dtools.pattern_open_draft(
+                arguments["name_or_sys_id"],
+                store=self.drafts, index=ctx["index"], pdi=ctx["pdi"],
+            )
+        if name == "draft_locate_steps":
+            return dtools.draft_locate_steps(
+                arguments["draft_id"],
+                arguments["predicate"],
+                store=self.drafts,
+                limit=int(arguments.get("limit", 50)),
+            )
+        if name == "draft_apply":
+            return dtools.draft_apply(
+                arguments["draft_id"],
+                arguments["op_name"],
+                arguments["params"],
+                store=self.drafts,
+            )
+        if name == "draft_validate":
+            return dtools.draft_validate(arguments["draft_id"], store=self.drafts)
+        if name == "draft_diff":
+            return dtools.draft_diff(arguments["draft_id"], store=self.drafts)
+        if name == "draft_finalize":
+            return dtools.draft_finalize(
+                arguments["draft_id"],
+                store=self.drafts, pdi=ctx["pdi"],
+                mode=arguments.get("mode", "serialize_only"),
+            )
+        if name == "draft_abandon":
+            return dtools.draft_abandon(arguments["draft_id"], store=self.drafts)
+        if name == "closure_capability":
+            return dtools.closure_capability(arguments["closure_keyword"])
         return f"ERROR: unknown tool: {name}"
 
     async def run(self) -> None:

@@ -1,0 +1,44 @@
+library {
+	name = "Fixture - General Pattern Variables"
+	id = "fixture_lib_gen_vars_0000000000000001"
+	description = "Mimics Windows - General Pattern Variables: probes a WMI namespace cold."
+	step {
+		name = "Set isVIP variable"
+		set_attr {
+			"isVIP"
+			"false"
+		}
+	}
+	step {
+		name = "Get cluster info from MSCluster_Cluster"
+		run_wmi_query_to_var {
+			namespace = "Root\\MSCluster"
+			query = "SELECT Name FROM MSCluster_Cluster"
+			var_names = table {
+				name = "MSCluster_Cluster"
+			}
+			if_not_found_do = nop {}
+			cache_flag = 0
+		}
+	}
+	step {
+		name = "Get cluster resources"
+		run_wmi_query_to_var {
+			namespace = "Root\\MSCluster"
+			query = "SELECT Name FROM MSCluster_Resource"
+			var_names = table {
+				name = "MSCluster_Resource"
+			}
+			if_not_found_do = nop {}
+			cache_flag = 0
+		}
+	}
+	step {
+		name = "Use the resources downstream (guarded read)"
+		if {
+			condition = is_not_empty {get_attr {"MSCluster_Resource"}}
+			on_true = nop {}
+			on_false = nop {}
+		}
+	}
+}

@@ -1,6 +1,6 @@
 # Agent Guide — sn-patterns-mcp
 
-You (Claude / Codex / any AI agent) have access to 8 tools that give you expert understanding of ServiceNow Discovery patterns. This document tells you when to use which tool, what to expect back, and how to chain them.
+You (Claude / Codex / any AI agent) have access to 25 tools that give you expert understanding of ServiceNow Discovery patterns and the ability to surgically edit them. This document tells you when to use which tool, what to expect back, and how to chain them.
 
 ## Mental model
 
@@ -34,6 +34,121 @@ The repo indexes 1227 real ServiceNow patterns plus a registry of 90 closure typ
 | "Where does this pattern fit?" / "Connect the dots" / "What runs around it?" | `pattern_lineage` | Libraries (recursive) + extensions + classifiers + pre/post + variable provenance |
 | "What is this pattern actually collecting?" / "What data does it touch?" | `pattern_data_sources` | Per-pattern: WMI / shell / registry / SNMP / file / HTTP enumeration with classification |
 | "What data is available on a Windows server?" / "What does Win32_Service give me?" | `pattern_data_sources_lookup` | Browse the bundled data-source catalog (Windows / Linux / F5 / Cisco) |
+| "Clone X and customize it" / "Add a guard before this step" / "Fix this hardcoded path" | `pattern_open_draft` → `draft_*` | Surgical-edit harness — see "Surgical-edit workflow" below |
+| "What can run_wmi_query_to_var NOT do, and how do I work around it?" | `closure_capability` | Closure limitations + parameterized recipe library |
+
+## Surgical-edit workflow (the v0.3 flagship)
+
+When a user wants to **clone-and-customize a shipping pattern** — wrap a step in a guard, swap a hardcoded path for a variable, broaden a filter, fix a column ref, or fork a library to fix problematic steps inside it — use the draft harness. This is the single highest-volume workflow: roughly 80% of real ITOM-forum threads about pattern pain are surgical edits, not new patterns from scratch.
+
+### Mental model
+
+A **Draft** is a mutable AST of one pattern (or library). You open a draft, locate steps with predicates, apply edit ops by name, validate, then finalize. Draft state lives in the MCP server process — sessions die on server restart.
+
+Drafts can have **child drafts** when you `clone_library`. The cross-draft validator walks parent → child redirect chains and flags dropped-var consumers downstream. This is the safety net for "I cleaned up the cluster library and the rest of the pattern silently broke."
+
+### The 8 draft tools
+
+| Tool | What it does |
+|---|---|
+| `pattern_open_draft` | Open an existing pattern (or library) as a mutable Draft. Returns `draft_id`. |
+| `draft_locate_steps` | Find steps matching a predicate. Returns opaque locators (`draft_id` + `step_uid`). |
+| `draft_apply` | Apply an edit op by name. Each op validates before mutating. |
+| `draft_validate` | Tier-1 + cross-draft var-flow validation of the current state. |
+| `draft_diff` | Unified textual diff: original vs current. |
+| `draft_finalize` | Materialize the draft. Modes: `serialize_only` / `sandbox` / `push_live` (last is intentionally not implemented). |
+| `draft_abandon` | Drop a draft and all child drafts. |
+| `closure_capability` | Describe a closure: required inputs, outputs, semantics, AND the **recipe library** of tested NDL fragments addressing its known limitations. |
+
+### Edit ops (passed to `draft_apply`)
+
+| Op | Use it for |
+|---|---|
+| `clone_library` | Fork a library by sys_id; auto-generates new sys_id, sandbox-prefixes name, opens as child draft. Required when fixing problematic steps inside a shared library you can't skip. |
+| `wrap_in_guard` | Wrap a step's operation in `if { condition; on_true=<orig>; on_false=nop }`. Idempotent. |
+| `insert_step_before` / `insert_step_after` | Insert a step relative to a target. Prefer **recipes** over raw `ndl_fragment` — they're parameterized, tested, and tied to closure-level limitations. |
+| `redirect_ref` | Change a `ref { refid = X }` step to point at Y. Used after `clone_library` to swap the parent's call site to the cloned library. |
+| `modify_closure_attr` | Mutate one attribute on a step's operation tree (e.g. replace a WMI query string, broaden a filter condition, swap a parsing strategy). |
+| `remove_step` | Delete a step. By default refuses if downstream steps read vars this one writes (without guards). Pass `force=true` to override after manual review. |
+
+### Recipes (used with `insert_step_*`)
+
+Recipes are tested NDL fragments attached to specific closures, addressing known limitations. **Use recipes — don't hand-write the NDL fragment** when one applies. Discover available recipes via `closure_capability(<closure>)`.
+
+Currently shipping:
+
+| Closure | Recipe | What it solves |
+|---|---|---|
+| `run_wmi_query_to_var` | `namespace_existence_probe` | WMI namespace existence is not validated; querying a non-existent namespace blocks for the WMI default timeout. Probe with PowerShell first. |
+| `run_wmi_query_to_var` | `wmi_query_with_where_optimization` | Unbounded result sets on heavily-populated providers (Win32_Printer on a print server). Push WHERE-clause filtering into the WMI query. |
+| `runcmd_to_var` | `exit_status_capture` | The closure does not expose `$?`. Append `; echo $?` and parse the trailing line. |
+
+### Worked example — Windows MSCluster (forum thread #1)
+
+The OOB Windows OS - Servers pattern crashes WMI on non-cluster servers because step 1 calls `Windows - General Pattern Variables`, which queries `Root\MSCluster` cold. You can't skip the library — downstream needs `isVIP`, `MSCluster_Cluster`, etc. Must clone and edit inside the clone.
+
+```
+1. pattern_open_draft("Windows OS - Servers")
+   → draft_id D
+2. draft_locate_steps(D, {"ref_to_refid": "<general-vars-lib-sys-id>"})
+   → outer ref locator
+3. closure_capability("run_wmi_query_to_var")
+   → discover namespace_existence_probe recipe
+4. draft_apply(D, "clone_library",
+       {"source_library_sys_id": "<general-vars>", "new_name": "...(custom)"})
+   → child_draft_id C, new_refid R
+5. draft_locate_steps(C, {"closure_keyword": "run_wmi_query_to_var",
+                          "attr_contains": ["namespace", "MSCluster"]})
+   → list of MSCluster step locators
+6. draft_apply(C, "insert_step_before",
+       {"target": <first-locator>,
+        "closure": "run_wmi_query_to_var",
+        "recipe": "namespace_existence_probe",
+        "params": {"namespace": "MSCluster", "out_var": "hasMSClusterNs"}})
+7. for each MSCluster locator:
+       draft_apply(C, "wrap_in_guard",
+           {"target": <locator>,
+            "condition_ndl": "is_not_empty {get_attr {\"hasMSClusterNs\"}}"})
+8. draft_apply(D, "redirect_ref",
+       {"target": <outer-ref-locator>, "new_refid": R})
+9. draft_validate(D)
+   → cross-draft var-flow check; expect ok=true
+10. draft_diff(D)
+   → unified diff for user review
+11. draft_finalize(D, mode="serialize_only")
+   → final NDL — user uploads via SN UI / sandbox
+```
+
+### Predicate fields for `draft_locate_steps`
+
+All optional, all AND'd:
+
+- `name_contains` / `name_equals` — match step name
+- `closure_keyword` — operation keyword (e.g. `"ref"`, `"run_wmi_query_to_var"`, `"runcmd_to_var"`)
+- `ref_to_refid` — for `ref` / `refid` steps targeting a specific library sys_id
+- `attr_eq` — `[attr_name, exact_value]`
+- `attr_contains` — `[attr_name, substring]`
+- `section` — `"identification"` | `"connection"` | `"extension"` | `"library"`
+
+### Locator stability
+
+Locators are opaque (`draft_id` + `step_uid`). They survive content mutations (wrap, redirect, modify-attr) because UIDs are anchored to step `_Block` object identity, not content signatures. They also survive insertions of other steps (existing UIDs keep, new step gets fresh UID). They are invalidated only by `remove_step` of the same step.
+
+You may re-locate after each edit if you want fresh data, but the same locator should still resolve unless you removed that specific step.
+
+### When to use surgical edit vs `pattern_create`
+
+Use `pattern_open_draft` + draft ops:
+- modifying a shipping OOB pattern
+- fixing a regression in a vendor pattern after a Yokohama/etc. upgrade
+- forking a library and adjusting steps inside it
+- adding guards / filters / row-count gates
+
+Use `pattern_create` + `pattern_validate`:
+- net-new pattern for a device/app SN doesn't ship a pattern for (Dell Unity, NetBackup, custom appliance)
+- token-based REST authentication (basic-auth-only OOB classifiers won't help)
+
+The two surfaces are complementary, not competing.
 
 ## The authoring loop (most important workflow)
 

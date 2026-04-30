@@ -11,7 +11,7 @@ python -m venv .venv
 .venv/Scripts/activate     # Windows
 # source .venv/bin/activate # macOS/Linux
 pip install -e .[dev]
-pytest -q                   # 181 / 181 should pass
+pytest -q                   # 229 / 229 should pass
 ```
 
 Test suite runs against the bundled fixtures by default. Some integration tests skip cleanly when `oids.db` or the live pattern index aren't present — that's expected on a fresh clone. To exercise everything end-to-end, see "Build the index" in the README.

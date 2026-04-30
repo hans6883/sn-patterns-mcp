@@ -2,19 +2,20 @@
 
 > Pattern-intelligence MCP server for ServiceNow Discovery. Gives any AI agent the ability to read, search, validate, author, and reason about ServiceNow Discovery patterns — including the NDL grammar, the 90 underlying operation closures, the SNMP OIDs they touch, the WMI / shell / registry / REST data sources they ingest, and the libraries / extensions / pre-post scripts that surround them.
 
-[![tests](https://img.shields.io/badge/tests-181%2F181-green)]()
+[![tests](https://img.shields.io/badge/tests-229%2F229-green)]()
 [![ruff](https://img.shields.io/badge/lint-ruff%20clean-green)]()
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ## What it does
 
-ServiceNow Discovery patterns are procedural definitions written in **NDL** (Network Discovery Language) that tell the MID Server how to identify, classify, and inventory configuration items (CIs). This project gives AI agents a comprehensive understanding of those patterns through 17 stdio MCP tools:
+ServiceNow Discovery patterns are procedural definitions written in **NDL** (Network Discovery Language) that tell the MID Server how to identify, classify, and inventory configuration items (CIs). This project gives AI agents a comprehensive understanding of those patterns through 25 stdio MCP tools:
 
 - **Read & explain** — step-by-step breakdown of any pattern, with operation-level semantics, inline OID resolution for SNMP steps, and source-tagged data (PDI live vs local index).
 - **Search** — semantic search across the pattern corpus by intent ("Tomcat on Linux") and across the 847K-OID MIB knowledge base by keyword or natural language.
 - **Validate** — Tier-1 local checks (syntax, parser/writer roundtrip, metadata, refids, closure required-inputs, variable read-before-write with discovery-context awareness) and Tier-2 PDI compile testing in a sandboxed `sa_pattern` row with self-healing role grants.
 - **Author** — research nearest-neighbor patterns + relevant closures + a skeleton, draft NDL, validate locally, compile-test against PDI, then push.
+- **Surgically edit shipping patterns** — open any pattern as a mutable Draft, locate steps via predicates, apply AST-level edit ops (clone library, wrap-in-guard, redirect ref, modify closure attribute, insert recipe, remove step), and the cross-draft validator catches dropped-var consumers before you push. Designed for the most common real workflow: clone-and-customize an OOB pattern (e.g. Windows Server with an unguarded MSCluster WMI step) without breaking downstream readers.
 - **Trace lineage** — full dependency graph: shared libraries (recursive), extensions, classifiers routing to the pattern, pre/post scripts and the variables they inject, and provenance of every variable the pattern reads.
 - **Inventory data sources** — for any pattern, list every WMI class, shell command, registry key, SNMP OID, file path, or HTTP endpoint it touches, classified by target (Windows / Linux / F5 / Cisco) and cross-referenced against a 90-entry catalog showing which closure ingests each and what CMDB attribute it typically populates.
 
@@ -26,10 +27,10 @@ cd sn-patterns-mcp
 python -m venv .venv
 .venv/Scripts/activate     # Windows; or `source .venv/bin/activate`
 pip install -e .[dev]
-pytest -q                   # 181/181 should pass
+pytest -q                   # 229/229 should pass
 ```
 
-The 17 tools work immediately against bundled fixtures. To enable the full corpus:
+The 25 tools work immediately against bundled fixtures. To enable the full corpus:
 
 ```bash
 # 1. (Optional) Build the OID/MIB knowledge base — ~15 min the first time
@@ -65,12 +66,20 @@ Without step 1, the four OID tools (`oid_lookup`, `oid_walk_explain`, `oid_searc
 | `pattern_lineage` | Full dependency graph: libraries, extensions, classifiers, pre/post, variable provenance. | "Where does this pattern fit?" |
 | `pattern_data_sources` | Per-pattern: WMI / shell / registry / SNMP / file / HTTP enumeration. | "What is this pattern actually collecting?" |
 | `pattern_data_sources_lookup` | Browse data-source catalog: Windows WMI, Linux, F5 tmsh, Cisco show. | "What data is on a Windows server?" |
+| `pattern_open_draft` | Open a pattern (or library) as a mutable Draft with stable step locators. | Starting any clone-and-customize workflow. |
+| `draft_locate_steps` | Find steps by predicate (name / closure / refid / attr). | Before applying an edit op. |
+| `draft_apply` | Apply an edit op: `clone_library`, `wrap_in_guard`, `insert_step_before`/`_after`, `redirect_ref`, `modify_closure_attr`, `remove_step`. | Mutating the draft. |
+| `draft_validate` | Tier-1 + cross-draft var-flow validation (parent reads vs cloned-child exports). | After every significant edit. |
+| `draft_diff` | Unified textual diff: original vs current draft. | Reviewing before finalize. |
+| `draft_finalize` | Materialize: `serialize_only` / `sandbox` / `push_live`. | Done editing. |
+| `draft_abandon` | Drop a draft and its child drafts. | Starting over / cleanup. |
+| `closure_capability` | Per-closure: signature + recipes addressing known limitations (e.g. `run_wmi_query_to_var.namespace_existence_probe`). | Discovering how to work around closure-level gaps. |
 
 All tools return plain text capped at 8000 chars and never raise — failures arrive as `ERROR:` prefixed responses with the reason.
 
 `pattern_analyze` automatically inline-resolves SNMP OIDs in `run_snmp_*` steps, so you see `1.3.6.1.2.1.1.5 → SNMPv2-MIB::sysName` next to the step without calling `oid_lookup` separately.
 
-> **For AI agents using these tools:** start with [docs/AGENTS.md](docs/AGENTS.md) — it tells you when to call which tool and what to expect back.
+> **For AI agents using these tools:** start with [docs/AGENTS.md](docs/AGENTS.md) — it tells you when to call which tool, when to use the surgical-edit harness vs from-scratch authoring, and what to expect back.
 
 ## Register with an MCP-aware client
 
@@ -115,20 +124,28 @@ print(pattern_validate(my_ndl_string))
 
 ```
 sn_patterns_mcp/
-├── ndl_parser.py        Recursive-descent NDL parser
-├── ndl_writer.py        NDL serializer (canonical block layout)
-├── pattern_model.py     Dataclasses: Pattern, Step, Operation, Identification, ...
-├── closures/registry.py 90 ClosureDescriptors with semantics, inputs, outputs
-├── validator.py         Tier-1 validation (syntax, roundtrip, refids, var ordering)
-├── prepost.py           Pre/post script analyzer (CTX.setAttribute extraction)
-├── pattern_index.py     On-disk JSON cache + manifest with semantic facets
-├── chroma_index.py      ChromaDB sn_patterns_structured collection wrapper
-├── pdi_client.py        ServiceNow REST client (with sysparm_query injection guard)
-├── local_data.py        Offline auxiliary data (prepost / classifiers / extensions)
-├── data_sources/        Catalog of data points per target (Windows / Linux / F5 / Cisco)
-├── oids/                SQLite-backed OID/MIB knowledge base + Chroma semantic index
-├── tools.py             MCP tool implementations
-└── server.py            stdio MCP server entry point + tool descriptions
+├── ndl_parser.py            Recursive-descent NDL parser
+├── ndl_writer.py            NDL serializer (canonical block layout)
+├── pattern_model.py         Dataclasses: Pattern, Step, Operation, Identification, ...
+├── closures/
+│   ├── registry.py          90 ClosureDescriptors with semantics, inputs, outputs
+│   └── recipes/             Per-closure tested NDL fragments addressing known limitations
+├── validator.py             Tier-1 validation (syntax, roundtrip, refids, var ordering)
+├── prepost.py               Pre/post script analyzer (CTX.setAttribute extraction)
+├── pattern_index.py         On-disk JSON cache + manifest with semantic facets
+├── chroma_index.py          ChromaDB sn_patterns_structured collection wrapper
+├── pdi_client.py            ServiceNow REST client (with sysparm_query injection guard)
+├── local_data.py            Offline auxiliary data (prepost / classifiers / extensions)
+├── data_sources/            Catalog of data points per target (Windows / Linux / F5 / Cisco)
+├── oids/                    SQLite-backed OID/MIB knowledge base + Chroma semantic index
+├── drafts/
+│   ├── store.py             Draft + DraftStore (in-memory, parent/child relationships)
+│   ├── locator.py           StepLocator + StepPredicate (object-identity-anchored)
+│   ├── ops/                 7 edit ops (clone_library, wrap_in_guard, redirect_ref, ...)
+│   ├── validator.py         Cross-draft var-flow validator
+│   └── mcp_tools.py         JSON-returning MCP tool wrappers for the harness
+├── tools.py                 Read/search/analyze/validate MCP tool implementations
+└── server.py                stdio MCP server entry point + tool descriptions
 ```
 
 ### Three-tier testing strategy
@@ -142,6 +159,18 @@ This project tests patterns at three tiers because pattern testing without real 
 | **Tier 3** | Pattern logic against synthetic device responses. **Future.** | Planned: scenario-driven emulator |
 
 `pattern_test_compile` self-heals first-run permission gaps (auto-grants the role required for `sa_pattern` writes and retries on 403) so it works out of the box.
+
+### Surgical-edit harness (the v0.3 flagship)
+
+The `drafts/` subsystem is the answer to "I want to clone-and-customize a shipping pattern" — the highest-volume real workflow. Sessions follow a fixed shape: open a draft, locate steps with a predicate, apply named edit ops, validate, diff, finalize.
+
+Architectural commitments:
+- **AST-level edit ops, not NDL regeneration.** The LLM picks an op (`wrap_in_guard`, `redirect_ref`, etc.) by name and parameter; the tool guarantees correctness over the parsed `_Block` tree. The agent never holds the raw NDL after-state in its context, eliminating the failure mode where an LLM "rewrites" a 22 KB pattern and silently corrupts a step it didn't mean to touch.
+- **Object-identity-anchored locators.** `step_uid → id(_Block)`. Locators survive content mutations (wrap, redirect, modify-attr) and step insertions; only `remove_step` invalidates a UID for that specific step.
+- **Closure capability matrix + recipe library.** When a closure has a known limitation (`run_wmi_query_to_var` doesn't validate WMI namespace existence; `runcmd_to_var` doesn't expose `$?`), the workaround lives as a parameterized, tested NDL fragment attached to the closure. Recipes are closure-level, not thread-level — a `namespace_existence_probe` recipe handles MSCluster, virtualization\v2, and any other WMI namespace gap with the same template.
+- **Cross-draft var-flow validation.** When `clone_library` produces a child draft and `redirect_ref` swaps the parent's call site, the validator walks parent reads against child exports and flags any var the cloned library no longer writes that the parent still reads — ERROR if unguarded, WARN if behind `is_not_empty`.
+
+See [docs/AGENTS.md](docs/AGENTS.md) for the complete tool surface, predicate fields, and a worked example (Windows MSCluster fix from forum thread #1).
 
 ### OID / MIB knowledge base
 
@@ -163,7 +192,7 @@ At runtime the loader orders authoritative IETF MIBs (`SNMPv2-MIB`, `IF-MIB`, `H
 ## Verification
 
 ```bash
-pytest -q                                     # 181/181
+pytest -q                                     # 229/229
 python scripts/export_patterns.py --limit 5   # smoke test PDI fetch
 python -m sn_patterns_mcp.server               # stdio server boots; ^C to exit
 ```
