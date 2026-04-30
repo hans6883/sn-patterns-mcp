@@ -11,7 +11,7 @@ A ServiceNow **pattern** is a structured procedure expressed in **NDL** (Network
 - **connection sections** — steps that find related CIs ("what databases does this app server connect to?")
 - **steps** — each step runs an **operation** (a *closure* in the Java code) like `runcmd_to_var`, `parse_file`, `set_attr`, `if`, `refid` (library reference), etc.
 
-The repo indexes 1227 real ServiceNow patterns plus a registry of 90 closure types with semantic descriptors. The tools below let you query, understand, validate, and author patterns against this knowledge base.
+The repo indexes 1227 real ServiceNow patterns plus a registry of 117 closure types with semantic descriptors (top-level operations plus the predicate / parse-strategy / table / variable-access blocks they nest). The tools below let you query, understand, validate, and author patterns against this knowledge base.
 
 ## Tool selection guide
 

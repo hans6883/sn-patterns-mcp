@@ -259,18 +259,36 @@ def draft_abandon(draft_id: str, *, store: DraftStore) -> str:
 # ---------------------------------------------------------------------------
 
 def closure_capability(closure_keyword: str) -> str:
-    """Describe a closure: signature + recipes addressing its limitations."""
+    """Describe a closure: signature + recipes addressing its limitations.
+
+    Always returns a JSON object with:
+      - closure: the keyword
+      - known: true if it's in the descriptor registry (90 cataloged closures)
+      - registry: descriptor fields (class_name, inputs, outputs, summary,
+        category, failure_modes) if known; empty otherwise
+      - recipes: list of recipes attached to this closure (may be empty)
+      - hint: only present when known=false; suggests what the agent can do
+    """
     from sn_patterns_mcp.closures import registry as closure_registry
     desc = closure_registry.get(closure_keyword)
     recipes = list_recipes(closure_keyword)
-    if desc is None and not recipes:
-        return _err(f"unknown closure: {closure_keyword!r}")
-    out: dict[str, Any] = {"closure": closure_keyword}
+    out: dict[str, Any] = {"closure": closure_keyword, "known": desc is not None}
     if desc is not None:
-        out["class_name"] = desc.class_name
-        out["required_inputs"] = list(getattr(desc, "required_inputs", []) or [])
-        out["outputs"] = list(getattr(desc, "outputs", []) or [])
-        out["semantics"] = getattr(desc, "semantics", "") or ""
+        out["registry"] = {
+            "class_name": getattr(desc, "class_name", None),
+            "category": getattr(getattr(desc, "category", None), "value", None),
+            "summary": getattr(desc, "summary", "") or "",
+            "inputs": list(getattr(desc, "inputs", []) or []),
+            "outputs": list(getattr(desc, "outputs", []) or []),
+            "failure_modes": list(getattr(desc, "failure_modes", []) or []),
+        }
+    else:
+        out["registry"] = {}
+        out["hint"] = (
+            "Closure keyword is not in the registered catalog. The harness can "
+            "still locate, wrap, or modify steps using this keyword via predicates "
+            "(closure_keyword=...). Validation will skip required-input checks for it."
+        )
     out["recipes"] = [
         {
             "name": r.name,

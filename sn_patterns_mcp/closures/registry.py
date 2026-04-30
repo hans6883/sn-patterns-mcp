@@ -82,7 +82,10 @@ def _d(
 
 
 # ---------------------------------------------------------------------------
-# Registry — 90 closures covering the NDL operations supported by the runtime.
+# Registry — closure descriptors covering the NDL operations supported by the runtime.
+# Includes both top-level operations (runcmd_to_var, run_wmi_query_to_var, ...)
+# and the helper blocks they nest (parse strategies, predicates, table ops,
+# variable access, control-flow branches).
 # ---------------------------------------------------------------------------
 
 CLOSURE_REGISTRY: dict[str, ClosureDescriptor] = {
@@ -563,6 +566,159 @@ CLOSURE_REGISTRY: dict[str, ClosureDescriptor] = {
     "position_in_text": _d(
         "position_in_text", "PositionInTextDTO", OperationCategory.PARSE_STRATEGY,
         "Position-in-text descriptor used by positional match strategies.",
+    ),
+
+    # ---- Variable / attribute access (very common, missing from earlier catalog) ----
+    "set_attr": _d(
+        "set_attr", "SetAttributeClosure", OperationCategory.VARIABLE,
+        "Write a value to a CTX attribute / pattern variable. First positional is the var name; "
+        "second is the value (literal, get_attr, or eval block).",
+        inputs=("var_name", "value"),
+        outputs=("$var_name",),
+    ),
+    "get_attr": _d(
+        "get_attr", "GetAttributeClosure", OperationCategory.VARIABLE,
+        "Read a CTX attribute / pattern variable. Single positional is the var name "
+        "(supports indexing: 'name', 'table[].col', 'table[*].col').",
+        inputs=("var_name",),
+    ),
+    "get_field": _d(
+        "get_field", "GetFieldClosure", OperationCategory.VARIABLE,
+        "Read one column value from the current row of a table during a transform/merge/filter.",
+        inputs=("field_name",),
+    ),
+    "eval": _d(
+        "eval", "EvalClosure", OperationCategory.EVAL,
+        "Evaluate an inline expression. Common form: eval { \"javascript: <code>\" } running on the MID server. "
+        "The string prefix selects the language (only 'javascript:' is widely seen).",
+        inputs=("expression",),
+        failure_modes=(
+            "JavaScript runtime exception in the expression",
+            "Returning undefined / null when downstream expects a string",
+        ),
+    ),
+    "ref": _d(
+        "ref", "ReferenceClosure", OperationCategory.LIBRARY,
+        "Library reference step. Equivalent to refid; carries the library sys_id in its `refid` attribute. "
+        "Most NDL uses `ref { refid = ... }` for shared-library expansion.",
+        inputs=("refid",),
+    ),
+
+    # ---- Control flow ----
+    "on_true": _d(
+        "on_true", "IfBranch", OperationCategory.CONTROL,
+        "Branch of an `if` block — runs when the condition evaluates true. Accepts any operation as its body.",
+    ),
+    "on_false": _d(
+        "on_false", "IfBranch", OperationCategory.CONTROL,
+        "Branch of an `if` block — runs when the condition evaluates false. Common bodies: nop {} or set_attr.",
+    ),
+    "condition": _d(
+        "condition", "IfCondition", OperationCategory.CONTROL,
+        "The predicate of an `if` block — typically is_empty / is_not_empty / contains / eq combined with all/any.",
+    ),
+    "log": _d(
+        "log", "LogClosure", OperationCategory.META,
+        "Emit an entry to sa_discovery_log at INFO/WARN/ERROR severity. Useful for marking pattern progress in long flows.",
+        inputs=("message", "level"),
+    ),
+    "error": _d(
+        "error", "ErrorClosure", OperationCategory.META,
+        "Emit an ERROR-level log entry and (depending on context) abort the current step.",
+        inputs=("message",),
+    ),
+    "continue": _d(
+        "continue", "ContinueClosure", OperationCategory.CONTROL,
+        "Continue past the current step without setting an error flag. Useful in conditional branches.",
+    ),
+
+    # ---- Predicates (used inside if/condition blocks) ----
+    "is_empty": _d(
+        "is_empty", "IsEmptyPredicate", OperationCategory.MATCH,
+        "True if the operand evaluates to empty/null. Operand is typically get_attr {var}.",
+        inputs=("operand",),
+    ),
+    "is_not_empty": _d(
+        "is_not_empty", "IsNotEmptyPredicate", OperationCategory.MATCH,
+        "True if the operand evaluates to non-empty. Standard guard before reading a possibly-unwritten var.",
+        inputs=("operand",),
+    ),
+    "all": _d(
+        "all", "AllPredicate", OperationCategory.MATCH,
+        "Logical AND across N nested predicates. Short-circuits.",
+    ),
+    "any": _d(
+        "any", "AnyPredicate", OperationCategory.MATCH,
+        "Logical OR across N nested predicates. Short-circuits.",
+    ),
+    "eq": _d(
+        "eq", "EqPredicate", OperationCategory.MATCH,
+        "Equality predicate over two operands (string compare).",
+        inputs=("left", "right"),
+    ),
+    "neq": _d(
+        "neq", "NeqPredicate", OperationCategory.MATCH,
+        "Inequality predicate.",
+        inputs=("left", "right"),
+    ),
+    "contains": _d(
+        "contains", "ContainsPredicate", OperationCategory.MATCH,
+        "True if a haystack contains a needle. For tables, true if any row matches.",
+        inputs=("haystack", "needle"),
+    ),
+    "not_contains": _d(
+        "not_contains", "NotContainsPredicate", OperationCategory.MATCH,
+        "True if a haystack does NOT contain the needle.",
+        inputs=("haystack", "needle"),
+    ),
+    "matches_regex": _d(
+        "matches_regex", "MatchesRegexPredicate", OperationCategory.MATCH,
+        "True if the operand string matches the supplied regex.",
+        inputs=("operand", "pattern"),
+    ),
+
+    # ---- Table operations (commonly seen forms — registry already had _table-suffixed variants) ----
+    "transform": _d(
+        "transform", "TransformTableClosure", OperationCategory.TABLE,
+        "Per-row transform of src_table_name into target_table_name. Body contains set_field operations "
+        "that derive new columns from the row's existing values (often via eval/get_attr).",
+        inputs=("src_table_name", "target_table_name", "operation"),
+        outputs=("$target_table_name",),
+    ),
+    "merge": _d(
+        "merge", "MergeTableClosure", OperationCategory.TABLE,
+        "Join two tables by key columns into result_table_name. unmatched_lines: 'remove' (inner) or 'keep' (left/outer).",
+        inputs=("table1_name", "table2_name", "key1_name", "key2_name", "result_table_name", "unmatched_lines"),
+        outputs=("$result_table_name",),
+    ),
+    "union": _d(
+        "union", "UnionTableClosure", OperationCategory.TABLE,
+        "Concatenate rows of table1 and table2 into result_table_name (column union).",
+        inputs=("table1_name", "table2_name", "result_table_name"),
+        outputs=("$result_table_name",),
+    ),
+    "filter": _d(
+        "filter", "FilterTableClosure", OperationCategory.TABLE,
+        "Filter rows of src_table_name into target_table_name by a row-predicate.",
+        inputs=("src_table_name", "target_table_name", "condition"),
+        outputs=("$target_table_name",),
+    ),
+
+    # ---- Parse strategies (commonly seen forms — registry already had specific variants) ----
+    "regex_parsing": _d(
+        "regex_parsing", "RegexParsingStrategy", OperationCategory.PARSE_STRATEGY,
+        "Parsing strategy: apply a regex to extract groups into named columns. Used inside parse_var_to_var.",
+        inputs=("regex",),
+    ),
+    "json_parsing": _d(
+        "json_parsing", "JsonParsingStrategy", OperationCategory.PARSE_STRATEGY,
+        "Parsing strategy: extract values from a JSON string by JSONPath-like selectors.",
+        inputs=("selectors",),
+    ),
+    "delimited_parsing": _d(
+        "delimited_parsing", "DelimitedParsingStrategy", OperationCategory.PARSE_STRATEGY,
+        "Parsing strategy: split input by delimiters into columns. selected_positions picks specific column indices.",
+        inputs=("selected_positions",),
     ),
 }
 

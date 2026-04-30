@@ -128,7 +128,7 @@ sn_patterns_mcp/
 ├── ndl_writer.py            NDL serializer (canonical block layout)
 ├── pattern_model.py         Dataclasses: Pattern, Step, Operation, Identification, ...
 ├── closures/
-│   ├── registry.py          90 ClosureDescriptors with semantics, inputs, outputs
+│   ├── registry.py          117 ClosureDescriptors with semantics, inputs, outputs
 │   └── recipes/             Per-closure tested NDL fragments addressing known limitations
 ├── validator.py             Tier-1 validation (syntax, roundtrip, refids, var ordering)
 ├── prepost.py               Pre/post script analyzer (CTX.setAttribute extraction)

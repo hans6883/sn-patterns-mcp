@@ -132,17 +132,36 @@ def test_draft_abandon_drops_draft(store, caller_ndl):
     assert not store.has(draft_id)
 
 
-def test_closure_capability_returns_recipes():
+def test_closure_capability_returns_descriptor_and_recipes():
     out = mcp_tools.closure_capability("run_wmi_query_to_var")
     payload = json.loads(out)
     assert payload["closure"] == "run_wmi_query_to_var"
+    assert payload["known"] is True
+    assert payload["registry"]["class_name"]
     recipe_names = {r["name"] for r in payload["recipes"]}
     assert "namespace_existence_probe" in recipe_names
 
 
-def test_closure_capability_unknown_returns_error():
+def test_closure_capability_known_without_recipes_still_returns_descriptor():
+    """Most closures (e.g. find_process_to_var) are in the registry but have no
+    recipes yet — must still return descriptor info, not ERROR."""
+    out = mcp_tools.closure_capability("find_process_to_var")
+    payload = json.loads(out)
+    assert payload["known"] is True
+    assert payload["registry"]
+    assert payload["recipes"] == []
+
+
+def test_closure_capability_unknown_returns_known_false_not_error():
+    """Unknown closures (or registry gaps like set_attr) return known=false with
+    a hint, NOT an ERROR. Agent can still use the keyword in predicates."""
     out = mcp_tools.closure_capability("totally_made_up_closure")
-    assert out.startswith("ERROR:")
+    assert not out.startswith("ERROR:")
+    payload = json.loads(out)
+    assert payload["closure"] == "totally_made_up_closure"
+    assert payload["known"] is False
+    assert payload["registry"] == {}
+    assert "hint" in payload
 
 
 def test_draft_validate_clean_draft(store, caller_ndl):
