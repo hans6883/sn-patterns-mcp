@@ -11,7 +11,7 @@ python -m venv .venv
 .venv/Scripts/activate     # Windows
 # source .venv/bin/activate # macOS/Linux
 pip install -e .[dev]
-pytest -q                   # 229 / 229 should pass
+pytest -q                   # 251 / 251 should pass
 ```
 
 Test suite runs against the bundled fixtures by default. Some integration tests skip cleanly when `oids.db` or the live pattern index aren't present — that's expected on a fresh clone. To exercise everything end-to-end, see "Build the index" in the README.
@@ -36,6 +36,7 @@ Test suite runs against the bundled fixtures by default. Some integration tests 
 - Branch from `main`. Keep PRs scoped — one logical change per PR.
 - Update `docs/AGENTS.md` if you add a tool, change a tool's signature, or change output format. AI agents read that file at runtime; stale docs are worse than no docs.
 - Update `README.md` only for top-level architecture changes. Keep it terse.
+- Update GitHub-facing metadata (`pyproject.toml` project description/URLs and the repository README) when a change alters the public tool count, architecture, or positioning.
 - Run `pytest` and `ruff check` before opening the PR. The PR template will ask for the test count.
 
 ## Reporting issues

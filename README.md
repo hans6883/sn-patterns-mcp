@@ -2,18 +2,19 @@
 
 > Pattern-intelligence MCP server for ServiceNow Discovery. Gives any AI agent the ability to read, search, validate, author, and reason about ServiceNow Discovery patterns — including the NDL grammar, the 90 underlying operation closures, the SNMP OIDs they touch, the WMI / shell / registry / REST data sources they ingest, and the libraries / extensions / pre-post scripts that surround them.
 
-[![tests](https://img.shields.io/badge/tests-245%2F245-green)]()
+[![tests](https://img.shields.io/badge/tests-251%2F251-green)]()
 [![ruff](https://img.shields.io/badge/lint-ruff%20clean-green)]()
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ## What it does
 
-ServiceNow Discovery patterns are procedural definitions written in **NDL** (Network Discovery Language) that tell the MID Server how to identify, classify, and inventory configuration items (CIs). This project gives AI agents a comprehensive understanding of those patterns through 26 stdio MCP tools:
+ServiceNow Discovery patterns are procedural definitions written in **NDL** (Network Discovery Language) that tell the MID Server how to identify, classify, and inventory configuration items (CIs). This project gives AI agents a comprehensive understanding of those patterns through 28 stdio MCP tools:
 
 - **Read & explain** — step-by-step breakdown of any pattern, with operation-level semantics, inline OID resolution for SNMP steps, and source-tagged data (PDI live vs local index).
 - **Search** — semantic search across the pattern corpus by intent ("Tomcat on Linux") and across the 847K-OID MIB knowledge base by keyword or natural language.
 - **Validate** — Tier-1 local checks (syntax, parser/writer roundtrip, metadata, refids, closure required-inputs, variable read-before-write with discovery-context awareness) and Tier-2 PDI compile testing in a sandboxed `sa_pattern` row with self-healing role grants.
+- **Plan target emulation** — Tier-3 sidecar emulator catalog and pattern-specific blueprints: exact TCP/UDP listeners, WMI / command / registry / SNMP / file / HTTP / LDAP fixtures, and MIB-backed OID responses for Windows, Unix/Linux, F5, NetScaler, Cisco, ESXi, and generic SNMP devices.
 - **Author** — research nearest-neighbor patterns + relevant closures + a skeleton, draft NDL, validate locally, compile-test against PDI, then push.
 - **Surgically edit shipping patterns** — open any pattern as a mutable Draft, locate steps via predicates, apply AST-level edit ops (clone library, wrap-in-guard, redirect ref, modify closure attribute, insert recipe, remove step), and the cross-draft validator catches dropped-var consumers before you push. Designed for the most common real workflow: clone-and-customize an OOB pattern (e.g. Windows Server with an unguarded MSCluster WMI step) without breaking downstream readers.
 - **Trace lineage** — full dependency graph: shared libraries (recursive), extensions, classifiers routing to the pattern, pre/post scripts and the variables they inject, and provenance of every variable the pattern reads.
@@ -22,15 +23,15 @@ ServiceNow Discovery patterns are procedural definitions written in **NDL** (Net
 ## Quick start
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/hans6883/sn-patterns-mcp.git
 cd sn-patterns-mcp
 python -m venv .venv
 .venv/Scripts/activate     # Windows; or `source .venv/bin/activate`
 pip install -e .[dev]
-pytest -q                   # 245/245 should pass
+pytest -q                   # 251/251 should pass
 ```
 
-The 26 tools work immediately against bundled fixtures. To enable the full corpus:
+The 28 tools work immediately against bundled fixtures. To enable the full corpus:
 
 ```bash
 # 1. (Optional) Build the OID/MIB knowledge base — ~15 min the first time
@@ -66,6 +67,8 @@ Without step 1, the four OID tools (`oid_lookup`, `oid_walk_explain`, `oid_searc
 | `pattern_lineage` | Full dependency graph: libraries, extensions, classifiers, pre/post, variable provenance. | "Where does this pattern fit?" |
 | `pattern_data_sources` | Per-pattern: WMI / shell / registry / SNMP / file / HTTP enumeration. | "What is this pattern actually collecting?" |
 | `pattern_data_sources_lookup` | Browse data-source catalog: Windows WMI, Linux, F5 tmsh, Cisco show. | "What data is on a Windows server?" |
+| `emulator_catalog` | Browse target-emulator profiles with exact protocols and ports. | "What systems can the sidecar emulate?" |
+| `emulator_blueprint` | Generate a sidecar emulator contract for a target, pattern, raw NDL, or OID list. | Before Tier-3 behavioral testing. |
 | `pattern_open_draft` | Open a pattern (or library) as a mutable Draft with stable step locators. | Starting any clone-and-customize workflow. |
 | `draft_locate_steps` | Find steps by predicate (name / closure / refid / attr). | Before applying an edit op. |
 | `draft_apply` | Apply an edit op: `clone_library`, `wrap_in_guard`, `insert_step_before`/`_after`, `redirect_ref`, `modify_closure_attr`, `remove_step`. | Mutating the draft. |
@@ -157,9 +160,25 @@ This project tests patterns at three tiers because pattern testing without real 
 |------|---|---|
 | **Tier 1** | Syntax, parser/writer agreement, refids, var ordering, metadata, required closure inputs. **Zero PDI dependency.** | `validator.py` → `pattern_validate` tool |
 | **Tier 2** | ServiceNow accepts the NDL on save (server-side semantic checks, dictionary validation). **No execution.** | `pattern_test_compile` tool — uploads to a sandbox `sa_pattern` row (name prefix `_sandbox_snmcp_`), observes accept/reject, cleans up |
-| **Tier 3** | Pattern logic against synthetic device responses. **Future.** | Planned: scenario-driven emulator |
+| **Tier 3** | Pattern logic against synthetic device responses. | `emulator_catalog` + `emulator_blueprint` define the sidecar/helper MCP contract: target profile, exact ports, protocol fixtures, MIB-backed OID responses, strict deterministic behavior |
 
 `pattern_test_compile` self-heals first-run permission gaps (auto-grants the role required for `sa_pattern` writes and retries on 403) so it works out of the box.
+
+### Sidecar target emulator option
+
+Tier 3 is modeled as a separate helper MCP, not as hidden logic inside this server. This server now owns the catalog and contract:
+
+- `emulator_catalog` lists emulatable target profiles and their protocol surfaces: Windows, Linux/Unix, F5 BIG-IP, Citrix ADC/NetScaler, Cisco IOS/NX-OS, VMware ESXi, and generic SNMP.
+- `emulator_blueprint` turns a pattern, raw NDL, explicit target, or OID list into a deterministic test contract: exact TCP/UDP listeners, fixture obligations, OID/MIB resolution, and strict behavior rules.
+- The sidecar MCP's single job is to bind those listeners, serve those fixtures, and record interactions. It should not author patterns, write to ServiceNow, or guess pass/fail from incomplete data.
+
+Example:
+
+```python
+from sn_patterns_mcp.tools import emulator_blueprint
+
+print(emulator_blueprint(target="netscaler", oids=["1.3.6.1.4.1.5951.1"]))
+```
 
 ### Surgical-edit harness (the v0.3 flagship)
 
@@ -193,7 +212,7 @@ At runtime the loader orders authoritative IETF MIBs (`SNMPv2-MIB`, `IF-MIB`, `H
 ## Verification
 
 ```bash
-pytest -q                                     # 245/245
+pytest -q                                     # 251/251
 python scripts/export_patterns.py --limit 5   # smoke test PDI fetch
 python -m sn_patterns_mcp.server               # stdio server boots; ^C to exit
 ```

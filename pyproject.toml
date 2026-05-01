@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sn-patterns-mcp"
 version = "0.2.0"
-description = "ServiceNow Discovery pattern intelligence MCP server — Python NDL parser/writer + 8 MCP tools (read, search, validate, author)"
+description = "ServiceNow Discovery pattern intelligence MCP server — Python NDL parser/writer + 28 MCP tools (read, search, validate, author, emulate)"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 keywords = ["servicenow", "discovery", "mcp", "ndl", "pattern", "ai-tools"]
@@ -15,6 +15,11 @@ dependencies = [
     "sentence-transformers>=2.7.0",
     "requests>=2.31.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/hans6883/sn-patterns-mcp"
+Repository = "https://github.com/hans6883/sn-patterns-mcp"
+Issues = "https://github.com/hans6883/sn-patterns-mcp/issues"
 
 [project.optional-dependencies]
 dev = [

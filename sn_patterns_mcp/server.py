@@ -165,6 +165,19 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Each entry shows the data point, access method (wmi/registry/command/snmp/rest), "
         "the closure that ingests it, and the typical CI attribute it lands in."
     ),
+    "emulator_catalog": (
+        "Browse the Tier-3 target-emulator catalog for a sidecar/helper MCP. Returns structured JSON "
+        "profiles for Windows, Linux/Unix, F5 BIG-IP, Citrix ADC/NetScaler, Cisco IOS/NX-OS, ESXi, "
+        "and generic SNMP targets, including exact listener ports/protocols and fidelity notes. "
+        "Use this when an agent needs to choose what kind of synthetic target to run a pattern against."
+    ),
+    "emulator_blueprint": (
+        "Generate a deterministic sidecar emulator blueprint for a pattern, raw NDL, explicit target, "
+        "or list of SNMP OIDs. Returns JSON with required TCP/UDP listeners, WMI/command/registry/SNMP/"
+        "file/HTTP/LDAP fixture obligations, OID/MIB resolution, and the strict execution contract. "
+        "Use this after pattern_validate or pattern_test_compile when you need Tier-3 behavioral testing "
+        "against an emulated real target."
+    ),
     "pattern_open_draft": (
         "Open an existing pattern (or library) as a mutable Draft for surgical editing. "
         "Returns a draft_id you pass to all subsequent draft_* calls in this session. "
@@ -310,6 +323,22 @@ def _make_tool_list():
              inputSchema=_input({
                  "target": {"type": "string", "description": "Target family: windows, linux, f5, cisco-ios, esxi"},
                  "query": {"type": "string", "description": "Keyword to search across all targets (use instead of or with target)"},
+             }, [])),
+        Tool(name="emulator_catalog", description=TOOL_DESCRIPTIONS["emulator_catalog"],
+             inputSchema=_input({
+                 "target": {"type": "string", "description": "Optional target alias: windows, linux, f5, netscaler, cisco-ios, esxi, generic-snmp"},
+                 "query": {"type": "string", "description": "Optional text filter across profile names, aliases, ports, and services"},
+             }, [])),
+        Tool(name="emulator_blueprint", description=TOOL_DESCRIPTIONS["emulator_blueprint"],
+             inputSchema=_input({
+                 "target": {"type": "string", "description": "Optional explicit target alias; overrides pattern inference"},
+                 "name_or_sys_id": {"type": "string", "description": "Optional indexed pattern name or 32-char sys_id"},
+                 "ndl": {"type": "string", "description": "Optional raw NDL text (max 1 MiB)"},
+                 "oids": {
+                     "type": "array",
+                     "items": {"type": "string"},
+                     "description": "Optional SNMP OIDs the emulator must serve, useful for generic MIB-driven targets",
+                 },
              }, [])),
         # ----- Draft / surgical-edit harness tools -----
         Tool(name="pattern_open_draft", description=TOOL_DESCRIPTIONS["pattern_open_draft"],
@@ -463,6 +492,20 @@ class SnPatternsServer:
             return ptools.pattern_data_sources_lookup(
                 target=arguments.get("target"),
                 query=arguments.get("query"),
+            )
+        if name == "emulator_catalog":
+            return ptools.emulator_catalog(
+                target=arguments.get("target"),
+                query=arguments.get("query"),
+            )
+        if name == "emulator_blueprint":
+            return ptools.emulator_blueprint(
+                target=arguments.get("target"),
+                name_or_sys_id=arguments.get("name_or_sys_id"),
+                ndl=arguments.get("ndl"),
+                oids=arguments.get("oids") or [],
+                index=ctx["index"],
+                pdi=ctx["pdi"],
             )
         # ----- Draft / surgical-edit harness -----
         if name == "pattern_open_draft":

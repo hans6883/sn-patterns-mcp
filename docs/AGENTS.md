@@ -1,6 +1,6 @@
 # Agent Guide — sn-patterns-mcp
 
-You (Claude / Codex / any AI agent) have access to 26 tools that give you expert understanding of ServiceNow Discovery patterns and the ability to surgically edit them. This document tells you when to use which tool, what to expect back, and how to chain them.
+You (Claude / Codex / any AI agent) have access to 28 tools that give you expert understanding of ServiceNow Discovery patterns and the ability to surgically edit them. This document tells you when to use which tool, what to expect back, and how to chain them.
 
 ## Mental model
 
@@ -34,6 +34,8 @@ The repo indexes 1227 real ServiceNow patterns plus a registry of 117 closure ty
 | "Where does this pattern fit?" / "Connect the dots" / "What runs around it?" | `pattern_lineage` | Libraries (recursive) + extensions + classifiers + pre/post + variable provenance |
 | "What is this pattern actually collecting?" / "What data does it touch?" | `pattern_data_sources` | Per-pattern: WMI / shell / registry / SNMP / file / HTTP enumeration with classification |
 | "What data is available on a Windows server?" / "What does Win32_Service give me?" | `pattern_data_sources_lookup` | Browse the bundled data-source catalog (Windows / Linux / F5 / Cisco) |
+| "What target can I emulate?" / "Show me ports for F5/Windows/NetScaler" | `emulator_catalog` | Browse the Tier-3 sidecar emulator catalog: target aliases, exact listeners, MIB enterprises, fidelity notes |
+| "Build an emulator contract for this pattern" / "Test this against a fake target" | `emulator_blueprint` | Generate required listeners and fixture obligations from indexed pattern, raw NDL, explicit target, or OID list |
 | "Clone X and customize it" / "Add a guard before this step" / "Fix this hardcoded path" | `pattern_open_draft` → `draft_*` | Surgical-edit harness — see "Surgical-edit workflow" below |
 | "What can run_wmi_query_to_var NOT do, and how do I work around it?" | `closure_capability` | Closure limitations + parameterized recipe library |
 | "Here's an NDL from a forum post — analyze / fix it" | `pattern_ingest_ndl` then any other tool | Adds session-scoped pattern to the in-memory index (flagged `not_authoritative=true`) so all other tools work against it |
@@ -548,6 +550,75 @@ Data-source search: query='SSL certificate', target=any
     typical CI: cmdb_ci_certificate
 ```
 
+### `emulator_catalog` output
+
+Use this when you need to know what the sidecar target emulator can represent and which ports/protocols matter.
+
+```
+{
+  "ok": true,
+  "known_targets": ["windows", "linux", "f5", "netscaler", "cisco-ios", "esxi", "generic-snmp"],
+  "summary_only": true,
+  "matches": [
+    {
+      "target": "windows",
+      "display_name": "Windows Server",
+      "ports": [
+        {"protocol": "tcp", "ports": [135], "service": "MSRPC endpoint mapper"},
+        {"protocol": "tcp", "ports": ["49152-65535"], "service": "MSRPC dynamic range"},
+        {"protocol": "tcp", "ports": [5985, 5986], "service": "WinRM"}
+      ],
+      "detail_hint": "Call emulator_catalog with target='windows' for required_for and fidelity notes."
+    }
+  ]
+}
+```
+
+Call with `target=<alias>` for full detail, including `required_for` closure mappings and fidelity notes. Aliases include `win`, `unix`, `bigip`, `citrix-adc`, `cisco`, `vmware`, and `snmp`.
+
+### `emulator_blueprint` output
+
+Use this after Tier-1/Tier-2 validation when you need a concrete Tier-3 target contract.
+
+Inputs can be:
+
+- `target`: explicit target alias, such as `windows`, `netscaler`, or `generic-snmp`
+- `name_or_sys_id`: indexed pattern name/sys_id
+- `ndl`: raw NDL text
+- `oids`: list of SNMP OIDs for MIB-driven emulation
+
+The output is structured JSON:
+
+```
+{
+  "ok": true,
+  "blueprint_version": "2026-04-30",
+  "target_profile": {"target": "windows", "display_name": "Windows Server"},
+  "required_listeners": [
+    {"protocol": "tcp", "ports": [135], "service": "MSRPC endpoint mapper"},
+    {"protocol": "tcp", "ports": ["49152-65535"], "service": "MSRPC dynamic range"}
+  ],
+  "fixtures": {
+    "wmi": [
+      {
+        "namespace": "root\\cimv2",
+        "query": "SELECT Caption, Version FROM Win32_OperatingSystem"
+      }
+    ],
+    "snmp": [
+      {
+        "oid": "1.3.6.1.2.1.1.5",
+        "name": "sysName",
+        "mib": "SNMPv2-MIB"
+      }
+    ]
+  },
+  "execution_contract": {"strict_mode": true}
+}
+```
+
+Treat the blueprint as a contract for the sidecar/helper MCP. It must bind the declared listeners, serve the declared fixtures, and record interactions; it should not author patterns or write to ServiceNow.
+
 ### `oid_search` output
 
 ```
@@ -579,6 +650,7 @@ The `[backend: ...]` tag tells you which engine produced the result. **Prefer SQ
 - **Surface PDI/Chroma backend failures to the user.** When you see `PDI failed: ...` or `Chroma error: ...` in tool output, mention it. The user may need to wake their PDI or rebuild Chroma.
 - **Use `pattern_compare` for "what changed?"** When the user has two pattern names or sys_ids and wants to know the diff.
 - **Use `ndl_explain` for tutoring.** When the user pastes NDL and wants to understand it without searching the corpus.
+- **Use `emulator_blueprint` for Tier-3 planning.** After a draft validates and compiles, generate the sidecar contract before claiming the pattern was behavior-tested against a target.
 
 ## Cost and quality model
 
@@ -590,6 +662,8 @@ The `[backend: ...]` tag tells you which engine produced the result. **Prefer SQ
 - `pattern_lineage` — local; recursive library walk caps at depth 3. Single-call replacement for analyze + resolve + debug for "show me everything" queries.
 - `pattern_data_sources` — pure local NDL walk. Free and fast.
 - `pattern_data_sources_lookup` — small in-memory catalog scan. <1ms.
+- `emulator_catalog` — pure local catalog lookup. <1ms.
+- `emulator_blueprint` — local pattern/NDL walk plus lazy OID resolution when SNMP fixtures are present. Usually <50ms.
 - `oid_lookup`, `oid_walk_explain` — first call triggers SQLite open (~30ms one-time); subsequent calls <1ms. The OID DB is loaded lazily.
 - `oid_search` — FTS5 ~6ms across 847K OIDs. Falls back to ChromaDB (~50-200ms) when FTS5 returns zero.
 - `pattern_snmp_audit` — pure local NDL + OID resolution. <50ms.

@@ -1701,6 +1701,82 @@ def pattern_data_sources_lookup(target: str | None = None, query: str | None = N
     return _clip("\n".join(out))
 
 
+# ---------------------------------------------------------------------------
+# emulator_* — Tier-3 target-emulator sidecar contract
+# ---------------------------------------------------------------------------
+
+def emulator_catalog(target: str | None = None, query: str | None = None) -> str:
+    """Browse the target-emulator catalog.
+
+    This is the discovery surface for a future sidecar/helper MCP whose only job
+    is target emulation. The output is structured JSON so an agent can pick an
+    exact target profile and hand it to an emulator runner.
+    """
+    from sn_patterns_mcp import emulator
+
+    payload = emulator.catalog(target=target, query=query)
+    if target and not payload["matches"]:
+        known = ", ".join(payload["known_targets"])
+        return f"ERROR: target {target!r} is not in the emulator catalog. Known targets: {known}."
+    return _clip(emulator.dumps(payload))
+
+
+def emulator_blueprint(
+    *,
+    target: str | None = None,
+    name_or_sys_id: str | None = None,
+    ndl: str | None = None,
+    oids: list[str] | None = None,
+    index=None,
+    pdi=None,
+) -> str:
+    """Generate a deterministic sidecar emulator blueprint.
+
+    Provide either a known pattern (`name_or_sys_id`), raw `ndl`, an explicit
+    `target`, or one or more SNMP `oids`. Pattern inputs produce the highest
+    fidelity output because the blueprint lists the exact WMI, command, registry,
+    SNMP, file, HTTP, and LDAP fixtures the emulator must serve.
+    """
+    from sn_patterns_mcp import emulator
+
+    profile = emulator.resolve_profile(target) if target else None
+    if target and profile is None:
+        known = ", ".join(emulator.known_targets())
+        return f"ERROR: target {target!r} is not in the emulator catalog. Known targets: {known}."
+
+    pattern = None
+    pattern_name = ""
+    if ndl and ndl.strip():
+        if len(ndl.encode("utf-8")) > MAX_NDL_INPUT_BYTES:
+            return f"ERROR: ndl exceeds {MAX_NDL_INPUT_BYTES} bytes"
+        try:
+            pattern = NdlParser().parse(ndl)
+        except NdlSyntaxError as e:
+            return f"ERROR: NDL failed to parse: {e}"
+        pattern_name = pattern.metadata.name or "(inline NDL)"
+    elif name_or_sys_id and name_or_sys_id.strip():
+        pattern, meta = _fetch_pattern(name_or_sys_id, index, pdi)
+        if pattern is None:
+            if meta:
+                return (
+                    f"ERROR: pattern {name_or_sys_id!r} has metadata but no cached NDL; "
+                    "hydrate the index or pass ndl=<raw pattern text>."
+                )
+            return f"ERROR: pattern not found: {name_or_sys_id!r}"
+        pattern_name = pattern.metadata.name or (meta or {}).get("name", "") or name_or_sys_id
+
+    if pattern is None and profile is None and not oids:
+        return "ERROR: provide target=<known target>, name_or_sys_id=<pattern>, ndl=<raw NDL>, or oids=[...]."
+
+    payload = emulator.blueprint(
+        target=target,
+        pattern=pattern,
+        pattern_name=pattern_name,
+        requested_oids=oids or [],
+    )
+    return _clip(emulator.dumps(payload))
+
+
 def _operand_value(op, key: str) -> str:
     """Pull a literal string out of an operand (e.g. cmd -> concat { 'literal' }).
 
@@ -1890,6 +1966,8 @@ __all__ = [
     "pattern_lineage",
     "pattern_data_sources",
     "pattern_data_sources_lookup",
+    "emulator_catalog",
+    "emulator_blueprint",
     "pattern_ingest_ndl",
     "MAX_CHARS",
 ]
