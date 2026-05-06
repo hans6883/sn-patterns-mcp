@@ -11,7 +11,7 @@ A ServiceNow **pattern** is a structured procedure expressed in **NDL** (Network
 - **connection sections** — steps that find related CIs ("what databases does this app server connect to?")
 - **steps** — each step runs an **operation** (a *closure* in the Java code) like `runcmd_to_var`, `parse_file`, `set_attr`, `if`, `refid` (library reference), etc.
 
-The repo indexes 1227 real ServiceNow patterns plus a registry of 117 closure types with semantic descriptors (top-level operations plus the predicate / parse-strategy / table / variable-access blocks they nest). The tools below let you query, understand, validate, and author patterns against this knowledge base.
+The repo ships a registry of 117 closure types with semantic descriptors (top-level operations plus the predicate / parse-strategy / table / variable-access blocks they nest), and indexes whatever pattern corpus the user has hydrated locally (typically a few thousand patterns, depending on the ServiceNow instance and installed plugins). The tools below let you query, understand, validate, and author patterns against this knowledge base.
 
 ## Tool selection guide
 
@@ -714,4 +714,4 @@ Three index states determine what tools can do:
 | **Metadata-only** (offline ingest, no NDL) | + `pattern_search`, basic `pattern_resolve`, basic `pattern_debug` | `pattern_analyze` returns metadata-only; `pattern_compare` says "NDL not cached" |
 | **Full** (live PDI export) | All 8 tools fully functional | — |
 
-You can ask the user to check by reading the server's stderr log on startup — it prints e.g. `index=1227 patterns, pdi=active`. If they say "0 patterns", they need to run the export script (see README).
+You can ask the user to check by reading the server's stderr log on startup — it prints e.g. `index=<N> patterns, pdi=active`. If they say "0 patterns", they need to run the export script (see README).

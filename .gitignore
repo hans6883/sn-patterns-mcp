@@ -28,7 +28,7 @@ htmlcov/
 .env.*
 !.env.example
 
-# Pattern index — local artifacts, regenerate from PDI or workspace dump
+# Pattern index — local artifacts; regenerate via scripts/export_patterns.py
 sn_patterns_mcp/pattern_index/patterns/
 sn_patterns_mcp/pattern_index/manifest.json
 sn_patterns_mcp/pattern_index/parse_failures.json

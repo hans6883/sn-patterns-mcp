@@ -1,7 +1,12 @@
-"""Offline ingest — builds the pattern index + auxiliary data from a local
-dump of `sa_pattern_*` and `discovery_classy_*` tables. Requires NO PDI access.
+"""Offline ingest — builds the pattern index + auxiliary data from JSON exports
+of `sa_pattern`, `sa_pattern_prepost_script`, `sa_pattern_extensions`, and
+`discovery_classy_*` tables that the user has produced themselves (e.g. via
+the ServiceNow Table API or the platform's "Export to JSON" UI option).
 
-Expected layout (configurable via --workspace and --raw-dir):
+Use this when you have JSON exports on disk and prefer not to run live PDI
+fetches via scripts/export_patterns.py.
+
+Expected layout (configurable via --workspace and --raw-subdir):
     <workspace>/patterns/                  per-pattern metadata JSONs
     <workspace>/<raw-subdir>/sa_patterns_full.json
     <workspace>/<raw-subdir>/sa_prepost_scripts_full.json
@@ -29,17 +34,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-# Paths can be overridden via CLI args or SN_WORKSPACE env var. The defaults
-# work for the project author's layout but won't apply to other users.
-DEFAULT_WORKSPACE = Path(
-    os.environ.get("SN_WORKSPACE", "")
-    or str(Path.home() / "servicenow-workspace" / "shared" / "instance-api")
-)
+# Workspace path must be supplied via --workspace, $SN_WORKSPACE, or implied
+# from CWD if it contains a `patterns/` subdirectory.
+DEFAULT_WORKSPACE = Path(os.environ.get("SN_WORKSPACE", "")) if os.environ.get("SN_WORKSPACE") else None
 DEFAULT_RAW_SUBDIR = os.environ.get("SN_RAW_SUBDIR", "raw")
 
-WORKSPACE = DEFAULT_WORKSPACE
-PATTERNS_DIR = WORKSPACE / "patterns"
-RAW_DIR = WORKSPACE / DEFAULT_RAW_SUBDIR
+WORKSPACE: Path | None = DEFAULT_WORKSPACE
+PATTERNS_DIR: Path | None = (WORKSPACE / "patterns") if WORKSPACE else None
+RAW_DIR: Path | None = (WORKSPACE / DEFAULT_RAW_SUBDIR) if WORKSPACE else None
 
 
 def _load_json_strip_bom(path: Path):
@@ -62,7 +64,7 @@ def _iter_rows(doc):
 def load_pattern_metadata() -> dict[str, dict]:
     manifest: dict[str, dict] = {}
 
-    # 1. 440 individual per-pattern files (rich description fields, but content=null)
+    # 1. Individual per-pattern metadata files (rich description fields, but content=null)
     if PATTERNS_DIR.exists():
         for p in PATTERNS_DIR.glob("*.json"):
             try:
@@ -85,7 +87,7 @@ def load_pattern_metadata() -> dict[str, dict]:
                 "has_ndl": False,
             }
 
-    # 2. Union with sa_patterns_full.json (1227 rows incl. scoped-app patterns)
+    # 2. Union with sa_patterns_full.json (the full table export incl. scoped-app patterns)
     full_path = RAW_DIR / "sa_patterns_full.json"
     if full_path.exists():
         rows = _iter_rows(_load_json_strip_bom(full_path))
@@ -176,9 +178,10 @@ def load_extensions() -> list[dict]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--workspace", default=str(DEFAULT_WORKSPACE),
-                    help="Root of the table-export dump. Defaults to $SN_WORKSPACE or "
-                         "~/servicenow-workspace/shared/instance-api.")
+    ap.add_argument("--workspace",
+                    default=str(DEFAULT_WORKSPACE) if DEFAULT_WORKSPACE else None,
+                    help="Root directory containing your JSON exports. "
+                         "Falls back to $SN_WORKSPACE if not given.")
     ap.add_argument("--raw-subdir", default=DEFAULT_RAW_SUBDIR,
                     help="Subdir of <workspace> containing sa_patterns_full.json etc.")
     ap.add_argument("--index-root", default=str(REPO_ROOT / "sn_patterns_mcp" / "pattern_index"))
@@ -187,6 +190,12 @@ def main() -> None:
     args = ap.parse_args()
 
     # Resolve the workspace + raw paths from args (override module-level defaults)
+    if not args.workspace:
+        sys.stderr.write(
+            "ERROR: no workspace given.\n"
+            "Pass --workspace <path-to-json-exports> or set $SN_WORKSPACE.\n"
+        )
+        sys.exit(2)
     global WORKSPACE, PATTERNS_DIR, RAW_DIR
     WORKSPACE = Path(args.workspace)
     PATTERNS_DIR = WORKSPACE / "patterns"
@@ -201,7 +210,7 @@ def main() -> None:
     root = Path(args.index_root)
     root.mkdir(parents=True, exist_ok=True)
 
-    print("Loading 440 per-pattern metadata files + sa_patterns_full.json ...")
+    print("Loading per-pattern metadata files + sa_patterns_full.json ...")
     manifest = load_pattern_metadata()
     print(f"  {len(manifest)} unique patterns")
 

@@ -1,6 +1,7 @@
-"""Integration tests against the real 1227-pattern local index.
+"""Integration tests against a hydrated local pattern index.
 
-Skipped if the index hasn't been built yet (scripts/ingest_local.py).
+Skipped if the index hasn't been built yet (scripts/ingest_local.py or
+scripts/export_patterns.py).
 """
 from __future__ import annotations
 
@@ -49,7 +50,7 @@ def test_pattern_search_aws():
 
 def test_pattern_analyze_metadata_only_for_known_pattern():
     idx = _index_or_skip()
-    # Pick a pattern we know exists from the 440 pattern files
+    # Pick a pattern likely to be present in any reasonably hydrated corpus
     out = pattern_analyze("A10", index=idx, pdi=None)
     assert "A10" in out
     # Since NDL isn't cached, we expect the metadata-only fallback

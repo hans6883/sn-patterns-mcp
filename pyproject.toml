@@ -39,7 +39,7 @@ include = ["sn_patterns_mcp*"]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
-    "live_index: tests requiring the full 1227-pattern index built (skipped if absent)",
+    "live_index: tests requiring a hydrated local pattern index (skipped if absent)",
 ]
 
 [tool.ruff]
