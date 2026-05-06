@@ -1,6 +1,6 @@
 # sn-patterns-mcp
 
-> Pattern-intelligence MCP server for ServiceNow Discovery. Gives any AI agent the ability to read, search, validate, author, and reason about ServiceNow Discovery patterns — including the NDL grammar, the 90 underlying operation closures, the SNMP OIDs they touch, the WMI / shell / registry / REST data sources they ingest, and the libraries / extensions / pre-post scripts that surround them.
+> Pattern-intelligence MCP server for ServiceNow Discovery. Gives any AI agent the ability to read, search, validate, author, surgically edit, and reason about ServiceNow Discovery patterns — including the NDL grammar, 117 cataloged operation closures, the SNMP OIDs they touch, the WMI / shell / registry / REST data sources they ingest, the libraries / extensions / pre-post scripts that surround them, and Tier-3 sidecar emulator blueprints for behavioral testing without real targets.
 
 [![tests](https://img.shields.io/badge/tests-251%2F251-green)]()
 [![ruff](https://img.shields.io/badge/lint-ruff%20clean-green)]()

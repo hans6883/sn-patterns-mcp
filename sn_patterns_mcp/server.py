@@ -1,4 +1,4 @@
-"""MCP stdio server exposing the 17 ServiceNow Discovery pattern tools.
+"""MCP stdio server exposing the 28 ServiceNow Discovery pattern tools.
 
 CRITICAL: stdout is reserved for MCP JSON-RPC. All logging must go to stderr.
 
