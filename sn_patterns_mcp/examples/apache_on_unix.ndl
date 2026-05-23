@@ -1,0 +1,60 @@
+pattern {
+	metadata {
+		id = "apache_on_unix_fixture"
+		name = "Apache on Unix (fixture)"
+		description = "Fixture pattern exercising common operations"
+		citype = "cmdb_ci_app_server_apache"
+		apply_to_os_types = "linux","solaris"
+	}
+
+	identification {
+		name = "Apache identification"
+		entrypoint {
+			type = "TCP"
+		}
+		find_process_strategy {
+			strategy = LISTENING_PORT
+		}
+		step {
+			name = "find httpd processes"
+			runcmd_to_var {
+				command = constant {
+					value = "ps -ef | grep httpd"
+				}
+				variable_name = "$process_list"
+				parse_delimited {
+					lineSeperator = "\n"
+					colSeperator = " "
+				}
+			}
+		}
+		step {
+			name = "read httpd.conf"
+			parse_file {
+				filePath = constant {
+					value = "/etc/httpd/conf/httpd.conf"
+				}
+				variable_name = "$conf"
+				parse_regex {
+					regex = "Listen\\s+(?<listen_port>[0-9]+)"
+				}
+			}
+		}
+	}
+
+	connection {
+		name = "extension via shared lib"
+		step {
+			name = "filesystem info"
+			refid = "get_unix_filesystem_lib_id"
+		}
+		step {
+			name = "compute server root"
+			EVAL {
+				groovyExpression = constant {
+					value = "javascript: var s = CTX.getAttribute('conf'); s ? s.toString() : '';"
+				}
+			}
+		}
+	}
+}

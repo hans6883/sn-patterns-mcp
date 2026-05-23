@@ -4,11 +4,45 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sn-patterns-mcp"
-version = "0.2.0"
-description = "ServiceNow Discovery pattern intelligence MCP server — Python NDL parser/writer + 28 MCP tools (read, search, validate, author, emulate)"
+version = "0.3.0"
+description = "ServiceNow Discovery pattern intelligence MCP server — Python NDL parser/writer + 28 MCP tools (read, search, validate, author, surgical-edit, emulate)"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-keywords = ["servicenow", "discovery", "mcp", "ndl", "pattern", "ai-tools"]
+authors = [{ name = "hans6883" }]
+maintainers = [{ name = "hans6883" }]
+keywords = [
+    "servicenow",
+    "discovery",
+    "cmdb",
+    "mcp",
+    "model-context-protocol",
+    "ndl",
+    "pattern",
+    "snmp",
+    "wmi",
+    "mib",
+    "itom",
+    "ai-tools",
+    "claude",
+    "agent",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Networking :: Monitoring",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
 dependencies = [
     "mcp>=1.2.0",
     "chromadb>=0.5.0",
@@ -20,6 +54,9 @@ dependencies = [
 Homepage = "https://github.com/hans6883/sn-patterns-mcp"
 Repository = "https://github.com/hans6883/sn-patterns-mcp"
 Issues = "https://github.com/hans6883/sn-patterns-mcp/issues"
+Changelog = "https://github.com/hans6883/sn-patterns-mcp/blob/master/CHANGELOG.md"
+Documentation = "https://github.com/hans6883/sn-patterns-mcp#readme"
+"Agent Guide" = "https://github.com/hans6883/sn-patterns-mcp/blob/master/docs/AGENTS.md"
 
 [project.optional-dependencies]
 dev = [
@@ -34,6 +71,30 @@ sn-patterns-mcp = "sn_patterns_mcp.server:main"
 
 [tool.setuptools.packages.find]
 include = ["sn_patterns_mcp*"]
+
+[tool.setuptools.package-data]
+# What ships in the wheel beyond *.py.
+# pattern_index/* and oids/data/* are local artifacts — gitignored, regenerated
+# by scripts/export_patterns.py and scripts/build_oid_index.py.
+"sn_patterns_mcp" = [
+    "data_sources/data/*.json",
+    "examples/*.ndl",
+]
+
+[tool.setuptools.exclude-package-data]
+# Belt-and-braces: even if a developer builds the wheel on a hydrated repo, no
+# locally-generated artifact ships. Wildcard globs future-proof against new
+# hydration outputs added to scripts/export_patterns.py or build_oid_index.py.
+"sn_patterns_mcp" = [
+    "pattern_index/*.json",
+    "pattern_index/patterns/*.json",
+    "pattern_index/*.log",
+    "oids/data/*",
+    "oids/*.db",
+    "oids/*.db-shm",
+    "oids/*.db-wal",
+    "oids/*.db-journal",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

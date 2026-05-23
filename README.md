@@ -23,6 +23,29 @@ ServiceNow Discovery patterns are procedural definitions written in **NDL** (Net
 ## Quick start
 
 ```bash
+pip install sn-patterns-mcp
+sn-patterns-mcp                              # boots the stdio MCP server (^C to exit)
+```
+
+Register with Claude Code in one line:
+
+```bash
+claude mcp add sn-patterns sn-patterns-mcp
+```
+
+On a bare install (no PDI, no hydration), 8 tools already work end-to-end against the shipped data:
+
+- `pattern_validate`, `ndl_explain` — parse and validate any NDL text you paste.
+- `closure_capability` — 117-closure semantics + the recipe library.
+- `pattern_data_sources_lookup` — Windows / Linux / F5 / Cisco data-source catalog.
+- `emulator_catalog`, `emulator_blueprint` — Tier-3 sidecar contracts (target / OID modes).
+- `pattern_ingest_ndl` — paste a pattern's NDL and the corpus-aware tools (`pattern_analyze`, `pattern_search`, `pattern_resolve`, `pattern_open_draft`) work on it for the session.
+
+To unlock the full corpus (pattern_search across thousands of patterns, OID resolution across 847K+ entries), see "Enable the full corpus" below.
+
+### From source (contributors)
+
+```bash
 git clone https://github.com/hans6883/sn-patterns-mcp.git
 cd sn-patterns-mcp
 python -m venv .venv
@@ -31,7 +54,7 @@ pip install -e .[dev]
 pytest -q                   # 251/251 should pass
 ```
 
-The 28 tools work immediately against bundled fixtures. To enable the full corpus:
+### Enable the full corpus
 
 ```bash
 # 1. (Optional) Build the OID/MIB knowledge base — ~15 min the first time
@@ -45,6 +68,10 @@ python scripts/export_patterns.py --limit 2000 --populate-chroma
 ```
 
 Without step 1, the four OID tools (`oid_lookup`, `oid_walk_explain`, `oid_search`, `pattern_snmp_audit`) operate against a small bundled seed set instead of the full 847K-OID corpus. Without step 2, pattern search and analysis run against fixtures only.
+
+### See it work in 60 seconds
+
+Walk through the MSCluster surgical-edit demo (forum thread #1 — clone the OOB Windows pattern, fix the unguarded WMI call, validate, diff): [docs/DEMO.md](docs/DEMO.md). Copy-pasteable; runs against bundled fixtures.
 
 ## Tools
 
@@ -87,17 +114,37 @@ All tools return plain text capped at 8000 chars and never raise — failures ar
 
 ## Register with an MCP-aware client
 
-Add to `.mcp.json` (project-local) or `~/.mcp.json` (global):
+### Claude Code (one-liner)
+
+```bash
+claude mcp add sn-patterns sn-patterns-mcp
+```
+
+### Manual `.mcp.json` (project-local) or `~/.mcp.json` (global)
+
+Minimal — uses bundled fixtures and works fully offline:
 
 ```json
 {
   "mcpServers": {
     "sn-patterns": {
-      "command": "python",
-      "args": ["-m", "sn_patterns_mcp.server"],
+      "command": "sn-patterns-mcp",
+      "transport": "stdio"
+    }
+  }
+}
+```
+
+With your own corpus + a ServiceNow PDI for Tier-2 compile / live diff:
+
+```json
+{
+  "mcpServers": {
+    "sn-patterns": {
+      "command": "sn-patterns-mcp",
       "transport": "stdio",
       "env": {
-        "SN_PATTERNS_INDEX_ROOT": "/abs/path/to/sn-patterns-mcp/sn_patterns_mcp/pattern_index",
+        "SN_PATTERNS_INDEX_ROOT": "/abs/path/to/your/hydrated/pattern_index",
         "SN_PATTERNS_CHROMA_DIR": "/abs/path/to/.sn_patterns_mcp/chroma",
         "SN_INSTANCE": "https://your-instance.service-now.com",
         "SN_USERNAME": "admin",
@@ -109,7 +156,7 @@ Add to `.mcp.json` (project-local) or `~/.mcp.json` (global):
 }
 ```
 
-PDI credentials are optional — the server runs offline (no Tier-2 PDI compile / live diff) without them. Logs go to stderr; never to stdout (which would corrupt the MCP JSON-RPC protocol).
+PDI credentials are optional — without them the server simply skips Tier-2 PDI compile and live diff. Logs go to stderr; never to stdout (which would corrupt the MCP JSON-RPC protocol).
 
 ## Direct Python usage (no MCP)
 
