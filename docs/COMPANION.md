@@ -24,6 +24,7 @@ Out of scope for Phase 2 (by intent):
 
 ## MCP tools
 
+### Emulator lifecycle
 | Tool | Purpose |
 |---|---|
 | `emulator_serve` | Start an SNMPv2c responder from a blueprint. Returns a `session_id`. |
@@ -31,6 +32,12 @@ Out of scope for Phase 2 (by intent):
 | `emulator_recording` | Read the in-memory recording for a session (with pagination). |
 | `emulator_stop` | Tear down a session's listener. JSONL recording on disk persists. |
 | `emulator_list_sessions` | List all active sessions. |
+
+### Record / replay regression harness
+| Tool | Purpose |
+|---|---|
+| `replay_diff` | Diff two JSONL recordings, output structured drift report (`MATCH` / `DRIFT`). Use after a SN family upgrade or pattern edit to assert behavioral regression survival. |
+| `replay_against_session` | Replay every GET / GETNEXT from a baseline JSONL against a *running* session and compare response bytes. Catches fixture drift introduced by a blueprint change. |
 
 ## End-to-end demo
 
@@ -92,6 +99,51 @@ sn-target-emulator serve --blueprint bp.json --recording session.jsonl --verbose
 # Step 3: inspect the recording after stop
 sn-target-emulator inspect --recording session.jsonl
 ```
+
+## The upgrade-regression demo (Phase 3)
+
+This is the killer use case the project exists for. End-to-end:
+
+```
+# === Pre-upgrade (Yokohama era) ===
+1. emulator_blueprint(name_or_sys_id="F5 BIG-IP load balancer pattern")
+   → blueprint JSON
+
+2. emulator_serve(blueprint=<that>, recording_path="baselines/f5-yokohama.jsonl")
+   → session_id=emu_aaaa
+   (drive your discovery flow at 127.0.0.1:<port> — your normal pattern test)
+
+3. emulator_stop(session_id=emu_aaaa)
+   → JSONL file persists at baselines/f5-yokohama.jsonl
+
+# === Six months pass. Customer upgrades to Zurich. ===
+
+# === Post-upgrade ===
+4. emulator_blueprint(name_or_sys_id="F5 BIG-IP load balancer pattern")
+   → blueprint JSON  (may differ if the pattern was edited)
+
+5. emulator_serve(blueprint=<that>, recording_path="current/f5-zurich.jsonl")
+   → session_id=emu_bbbb
+   (drive your discovery flow again — same way)
+
+6. emulator_stop(session_id=emu_bbbb)
+
+# === Verdict ===
+7. replay_diff(baseline_path="baselines/f5-yokohama.jsonl",
+               current_path="current/f5-zurich.jsonl")
+   → {
+       "ok": true,
+       "summary": { "verdict": "MATCH",
+                    "baseline_interactions": 47, "current_interactions": 47,
+                    "drift_counts": { "value_diff": 0, "missing_in_current": 0,
+                                      "added_in_current": 0, "error_diff": 0 } },
+       "drift":   { "value_diff": [], ... }
+     }
+```
+
+If the verdict is `MATCH`, the pattern is upgrade-safe. If it's `DRIFT`, the response contains exactly which (request_type, OID) tuples differ and at what bytes, ready for human review.
+
+For sandbox self-regression (verify the emulator itself produces deterministic bytes across runs of the same fixture), use `replay_against_session` — it replays a baseline's requests against a *live* session and asserts byte-identity in-process, without needing a second JSONL recording.
 
 ## Determinism contract
 

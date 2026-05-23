@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ## [Unreleased] — targeting 0.4.0
 
+### Added — Record / replay regression harness (Phase 3)
+
+The killer feature this project exists for. Two new MCP tools on `sn-target-emulator-mcp`:
+
+- `replay_diff` — diff two JSONL recordings (a known-good baseline and a current capture). Produces a structured drift report keyed on `(request_type, oid)` with four drift buckets (`value_diff`, `missing_in_current`, `added_in_current`, `error_diff`). Empty drift = `MATCH`; non-empty = `DRIFT` with exact bytes that changed.
+- `replay_against_session` — replay every GET/GETNEXT from a baseline against a *running* session, comparing response bytes in-process. Catches fixture drift caused by a blueprint change.
+
+New module `sn_patterns_mcp/target_emulator/replay.py` with `diff_interactions()`, `diff_files()`, `replay_against_session()` and the `DiffReport` / `KeyDiff` / `ReplayResult` dataclasses.
+
+End-to-end killer demo documented in `docs/COMPANION.md` — the Yokohama → Zurich upgrade-survival flow that ServiceNow customers have begged for since patterns shipped.
+
+15 new tests (12 diff-engine unit tests + 3 server-end-to-end including the byte-level drift demo). Total now 330/330.
+
 ### Added — Tier-3 SNMP sandbox companion
 
 The companion that consumes `emulator_blueprint` output and actually binds listeners. Ships in the same wheel as a sibling sub-package; two new console entry points expose it.

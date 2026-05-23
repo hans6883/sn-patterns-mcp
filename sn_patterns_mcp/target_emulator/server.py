@@ -30,6 +30,12 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from sn_patterns_mcp.target_emulator.replay import (
+    diff_files,
+)
+from sn_patterns_mcp.target_emulator.replay import (
+    replay_against_session as _replay_against_session_func,
+)
 from sn_patterns_mcp.target_emulator.runtime import (
     DEFAULT_BIND_HOST,
     EmulatorRuntime,
@@ -81,6 +87,23 @@ TOOL_DESCRIPTIONS = {
     ),
     "emulator_list_sessions": (
         "List every active emulator session. No inputs."
+    ),
+    "replay_diff": (
+        "Diff two JSONL recordings produced by the emulator. Use this AFTER a ServiceNow "
+        "family upgrade or pattern edit to assert behavioral regression survival: produces "
+        "a structured drift report keyed on (request_type, oid). Empty drift = MATCH (safe). "
+        "Non-empty drift = exact bytes that changed, ready for human review. "
+        "Inputs: baseline_path (required), current_path (required). Returns JSON with "
+        "verdict (MATCH / DRIFT) and per-key drift buckets (value_diff, missing_in_current, "
+        "added_in_current, error_diff)."
+    ),
+    "replay_against_session": (
+        "Re-issue every GET / GETNEXT recorded in a baseline JSONL against a live emulator "
+        "session, comparing response bytes. Useful for verifying the emulator itself is "
+        "byte-deterministic across runs and for catching fixture drift introduced by a "
+        "blueprint change. Inputs: baseline_path (required), session_id (required), "
+        "community (default 'public'), request_timeout_seconds (default 2). Returns JSON "
+        "with per-request match/mismatch results."
     ),
 }
 
@@ -233,6 +256,74 @@ class SnTargetEmulatorServer:
             "recording_path": str(sess.recording_path) if sess.recording_path else None,
         })
 
+    async def replay_diff(self, arguments: dict) -> str:
+        baseline_path = arguments.get("baseline_path")
+        current_path = arguments.get("current_path")
+        if not isinstance(baseline_path, str) or not baseline_path:
+            return _err("baseline_path (string) is required")
+        if not isinstance(current_path, str) or not current_path:
+            return _err("current_path (string) is required")
+        baseline = Path(baseline_path)
+        current = Path(current_path)
+        if not baseline.is_file():
+            return _err(f"baseline_path does not exist: {baseline_path!r}")
+        if not current.is_file():
+            return _err(f"current_path does not exist: {current_path!r}")
+        try:
+            report = diff_files(baseline, current)
+        except Exception as e:
+            log.exception("replay_diff failed")
+            return _err(f"diff failed: {e}")
+        return _ok_json(report.to_dict())
+
+    async def replay_against_session(self, arguments: dict) -> str:
+        baseline_path = arguments.get("baseline_path")
+        sid = arguments.get("session_id", "")
+        if not isinstance(baseline_path, str) or not baseline_path:
+            return _err("baseline_path (string) is required")
+        sess = self.sessions.get(sid)
+        if sess is None:
+            return _err(f"unknown session_id: {sid!r}")
+        baseline = Path(baseline_path)
+        if not baseline.is_file():
+            return _err(f"baseline_path does not exist: {baseline_path!r}")
+        community = arguments.get("community", "public")
+        try:
+            timeout = float(arguments.get("request_timeout_seconds", 2.0))
+        except (TypeError, ValueError):
+            return _err("request_timeout_seconds must be a number")
+        host, port = sess.runtime.snmp_address()
+        try:
+            results = await _replay_against_session_func(
+                baseline, host, port,
+                community=community,
+                request_timeout=timeout,
+            )
+        except Exception as e:
+            log.exception("replay_against_session failed")
+            return _err(f"replay failed: {e}")
+        mismatched = [r for r in results if not r.matches]
+        return _ok_json({
+            "ok": True,
+            "session_id": sid,
+            "summary": {
+                "verdict": "MATCH" if not mismatched else "DRIFT",
+                "replayed": len(results),
+                "matched": len(results) - len(mismatched),
+                "mismatched": len(mismatched),
+            },
+            "results": [
+                {
+                    "request_type": r.request_type,
+                    "oid": r.oid,
+                    "matches": r.matches,
+                    "baseline_value_hex": r.baseline_value_hex,
+                    "current_value_hex": r.current_value_hex,
+                }
+                for r in results
+            ],
+        })
+
     async def emulator_list_sessions(self, _arguments: dict) -> str:
         out = []
         for sid, sess in self.sessions.items():
@@ -254,6 +345,8 @@ class SnTargetEmulatorServer:
             "emulator_recording": self.emulator_recording,
             "emulator_stop": self.emulator_stop,
             "emulator_list_sessions": self.emulator_list_sessions,
+            "replay_diff": self.replay_diff,
+            "replay_against_session": self.replay_against_session,
         }.get(name)
         if handler is None:
             return _err(f"unknown tool: {name!r}")
@@ -308,6 +401,23 @@ class SnTargetEmulatorServer:
             Tool(name="emulator_list_sessions",
                  description=TOOL_DESCRIPTIONS["emulator_list_sessions"],
                  inputSchema=_input({}, [])),
+            Tool(name="replay_diff",
+                 description=TOOL_DESCRIPTIONS["replay_diff"],
+                 inputSchema=_input({
+                     "baseline_path": {"type": "string",
+                                       "description": "Path to a JSONL recording from a known-good run"},
+                     "current_path": {"type": "string",
+                                      "description": "Path to a JSONL recording to compare against the baseline"},
+                 }, ["baseline_path", "current_path"])),
+            Tool(name="replay_against_session",
+                 description=TOOL_DESCRIPTIONS["replay_against_session"],
+                 inputSchema=_input({
+                     "baseline_path": {"type": "string"},
+                     "session_id": {"type": "string"},
+                     "community": {"type": "string", "default": "public"},
+                     "request_timeout_seconds": {"type": "number",
+                                                 "default": 2.0, "minimum": 0.1, "maximum": 30.0},
+                 }, ["baseline_path", "session_id"])),
         ]
 
         server: Server = Server("sn-target-emulator-mcp")

@@ -153,3 +153,102 @@ async def test_recording_rejects_negative_limit(server):
     sid = json.loads(await server.emulator_serve({"blueprint": bp}))["session_id"]
     out = await server.emulator_recording({"session_id": sid, "limit": -1})
     assert out.startswith("ERROR:")
+
+
+@pytest.mark.asyncio
+async def test_replay_diff_match(server, tmp_path):
+    bp = {"fixtures": {"snmp": [
+        {"oid": "1.3.6.1.2.1.1.5.0", "syntax": "DisplayString", "value": "stable-name"},
+    ]}}
+    # Two separate sessions both write a baseline-quality interaction; the
+    # value is the same so the diff should be MATCH.
+    base_path = tmp_path / "baseline.jsonl"
+    curr_path = tmp_path / "current.jsonl"
+    for path in (base_path, curr_path):
+        sid = json.loads(await server.emulator_serve({
+            "blueprint": bp, "recording_path": str(path),
+        }))["session_id"]
+        # Drive one real request via socket round-trip
+        host, port = server.sessions[sid].runtime.snmp_address()
+        req = s.encode_message(s.SnmpMessage(
+            version=s.SNMP_V2C_VERSION, community="public",
+            pdu_type=s.T_GET_REQUEST, request_id=1,
+            error_status=0, error_index=0,
+            varbinds=[s.VarBind.null("1.3.6.1.2.1.1.5.0")],
+        ))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setblocking(False)
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.sock_connect(sock, (host, port))
+            await loop.sock_sendall(sock, req)
+            await asyncio.wait_for(loop.sock_recv(sock, 65535), timeout=1.0)
+        finally:
+            sock.close()
+        await server.emulator_stop({"session_id": sid})
+
+    diff_out = json.loads(await server.replay_diff({
+        "baseline_path": str(base_path),
+        "current_path":  str(curr_path),
+    }))
+    assert diff_out["ok"] is True
+    assert diff_out["summary"]["verdict"] == "MATCH"
+
+
+@pytest.mark.asyncio
+async def test_replay_diff_rejects_missing_files(server, tmp_path):
+    out = await server.replay_diff({
+        "baseline_path": str(tmp_path / "nope.jsonl"),
+        "current_path":  str(tmp_path / "also-nope.jsonl"),
+    })
+    assert out.startswith("ERROR:")
+
+
+@pytest.mark.asyncio
+async def test_replay_against_session_drift_demo(server, tmp_path):
+    """End-to-end killer demo: pretend SN got upgraded and now returns a
+    different sysName. The replay surfaces the exact byte-level mismatch."""
+    base_path = tmp_path / "yokohama-baseline.jsonl"
+
+    # Phase 1: pre-upgrade baseline
+    bp1 = {"fixtures": {"snmp": [
+        {"oid": "1.3.6.1.2.1.1.5.0", "syntax": "DisplayString", "value": "yokohama-router"},
+    ]}}
+    sid1 = json.loads(await server.emulator_serve({
+        "blueprint": bp1, "recording_path": str(base_path),
+    }))["session_id"]
+    host, port = server.sessions[sid1].runtime.snmp_address()
+    req = s.encode_message(s.SnmpMessage(
+        version=s.SNMP_V2C_VERSION, community="public",
+        pdu_type=s.T_GET_REQUEST, request_id=1,
+        error_status=0, error_index=0,
+        varbinds=[s.VarBind.null("1.3.6.1.2.1.1.5.0")],
+    ))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(False)
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.sock_connect(sock, (host, port))
+        await loop.sock_sendall(sock, req)
+        await asyncio.wait_for(loop.sock_recv(sock, 65535), timeout=1.0)
+    finally:
+        sock.close()
+    await server.emulator_stop({"session_id": sid1})
+
+    # Phase 2: post-upgrade — different value for the same OID
+    bp2 = {"fixtures": {"snmp": [
+        {"oid": "1.3.6.1.2.1.1.5.0", "syntax": "DisplayString", "value": "zurich-router"},
+    ]}}
+    sid2 = json.loads(await server.emulator_serve({"blueprint": bp2}))["session_id"]
+    replay_out = json.loads(await server.replay_against_session({
+        "baseline_path": str(base_path),
+        "session_id": sid2,
+    }))
+    assert replay_out["ok"] is True
+    assert replay_out["summary"]["verdict"] == "DRIFT"
+    assert replay_out["summary"]["mismatched"] == 1
+    # The current_value_hex should decode to "zurich-router"
+    result = replay_out["results"][0]
+    assert result["matches"] is False
+    decoded = bytes.fromhex(result["current_value_hex"]).decode("utf-8", errors="replace")
+    assert "zurich-router" in decoded
