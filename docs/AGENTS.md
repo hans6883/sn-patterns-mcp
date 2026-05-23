@@ -36,6 +36,7 @@ The repo ships a registry of 117 closure types with semantic descriptors (top-le
 | "What data is available on a Windows server?" / "What does Win32_Service give me?" | `pattern_data_sources_lookup` | Browse the bundled data-source catalog (Windows / Linux / F5 / Cisco) |
 | "What target can I emulate?" / "Show me ports for F5/Windows/NetScaler" | `emulator_catalog` | Browse the Tier-3 sidecar emulator catalog: target aliases, exact listeners, MIB enterprises, fidelity notes |
 | "Build an emulator contract for this pattern" / "Test this against a fake target" | `emulator_blueprint` | Generate required listeners and fixture obligations from indexed pattern, raw NDL, explicit target, or OID list |
+| "Actually serve those fixtures so I can fire SNMP at it" | companion: `emulator_serve` | Boot the Tier-3 SNMPv2c responder from the blueprint. See [COMPANION.md](COMPANION.md). |
 | "Clone X and customize it" / "Add a guard before this step" / "Fix this hardcoded path" | `pattern_open_draft` → `draft_*` | Surgical-edit harness — see "Surgical-edit workflow" below |
 | "What can run_wmi_query_to_var NOT do, and how do I work around it?" | `closure_capability` | Closure limitations + parameterized recipe library |
 | "Here's an NDL from a forum post — analyze / fix it" | `pattern_ingest_ndl` then any other tool | Adds session-scoped pattern to the in-memory index (flagged `not_authoritative=true`) so all other tools work against it |

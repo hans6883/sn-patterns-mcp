@@ -48,6 +48,7 @@ dependencies = [
     "chromadb>=0.5.0",
     "sentence-transformers>=2.7.0",
     "requests>=2.31.0",
+    "pyasn1>=0.5",
 ]
 
 [project.urls]
@@ -68,6 +69,8 @@ dev = [
 
 [project.scripts]
 sn-patterns-mcp = "sn_patterns_mcp.server:main"
+sn-target-emulator-mcp = "sn_patterns_mcp.target_emulator.server:main"
+sn-target-emulator = "sn_patterns_mcp.target_emulator.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["sn_patterns_mcp*"]

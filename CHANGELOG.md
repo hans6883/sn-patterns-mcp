@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — targeting 0.4.0
+
+### Added — Tier-3 SNMP sandbox companion
+
+The companion that consumes `emulator_blueprint` output and actually binds listeners. Ships in the same wheel as a sibling sub-package; two new console entry points expose it.
+
+- `sn_patterns_mcp.target_emulator/` — new package: hand-rolled SNMPv2c GET/GETNEXT responder over asyncio UDP, blueprint-driven fixture table, JSONL recording, deterministic wire output (no timestamps / source ports / nonces in the response stream, so Phase 3 record/replay diffs are meaningful).
+- `sn-target-emulator-mcp` — new stdio MCP server with 5 tools: `emulator_serve`, `emulator_status`, `emulator_recording`, `emulator_stop`, `emulator_list_sessions`. Multi-session; each session owns one UDP listener bound to a configurable port.
+- `sn-target-emulator` — standalone CLI for human debugging: `serve --blueprint b.json [--recording session.jsonl]` plus `inspect --recording session.jsonl`.
+- Hand-rolled BER encoder/decoder for the narrow SNMPv2c subset: INTEGER, OCTET STRING, NULL, OID, Counter32/64, Gauge32, TimeTicks, IpAddress, plus the v2c exception varbinds (`noSuchObject`, `noSuchInstance`, `endOfMibView`). 47 unit tests cover the BER round-trip; 10 integration tests bind real UDP on loopback and verify GET/GETNEXT/end-of-MIB/community-mismatch behavior.
+- Fixture-value inference: when a blueprint entry's `value` is the `<scenario-value>` placeholder, the runtime picks a deterministic stub based on the declared MIB SYNTAX. Caller can override by providing an explicit `value` in `fixtures.snmp[i]`.
+- `docs/COMPANION.md` — full tool surface, end-to-end demo (blueprint → serve → query → recording), recording schema spec, registration recipe.
+
+### Added — explicit dependency
+- `pyasn1>=0.5` as a project dependency (the only addition for the companion; everything else uses stdlib `asyncio` + `socket`).
+
+### Test count
+- 305/305 tests pass (was 251/251); +54 from the target_emulator package.
+
 ## [0.3.0] — 2026-05-23
 
 First PyPI release. Captures everything in the public repo as of the `go-public` milestone, plus the surgical-edit harness and Tier-3 emulator blueprint surface introduced after v0.2.0.

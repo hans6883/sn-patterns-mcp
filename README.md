@@ -15,6 +15,7 @@ ServiceNow Discovery patterns are procedural definitions written in **NDL** (Net
 - **Search** — semantic search across the pattern corpus by intent ("Tomcat on Linux") and across the 847K-OID MIB knowledge base by keyword or natural language.
 - **Validate** — Tier-1 local checks (syntax, parser/writer roundtrip, metadata, refids, closure required-inputs, variable read-before-write with discovery-context awareness) and Tier-2 PDI compile testing in a sandboxed `sa_pattern` row with self-healing role grants.
 - **Plan target emulation** — Tier-3 sidecar emulator catalog and pattern-specific blueprints: exact TCP/UDP listeners, WMI / command / registry / SNMP / file / HTTP / LDAP fixtures, and MIB-backed OID responses for Windows, Unix/Linux, F5, NetScaler, Cisco, ESXi, and generic SNMP devices.
+- **Run target emulation (SNMPv2c)** — the bundled `sn-target-emulator-mcp` companion consumes those blueprints, binds a deterministic UDP responder on loopback, serves GET/GETNEXT against the declared OIDs, and records every interaction as JSONL. See [docs/COMPANION.md](docs/COMPANION.md).
 - **Author** — research nearest-neighbor patterns + relevant closures + a skeleton, draft NDL, validate locally, compile-test against PDI, then push.
 - **Surgically edit shipping patterns** — open any pattern as a mutable Draft, locate steps via predicates, apply AST-level edit ops (clone library, wrap-in-guard, redirect ref, modify closure attribute, insert recipe, remove step), and the cross-draft validator catches dropped-var consumers before you push. Designed for the most common real workflow: clone-and-customize an OOB pattern (e.g. Windows Server with an unguarded MSCluster WMI step) without breaking downstream readers.
 - **Trace lineage** — full dependency graph: shared libraries (recursive), extensions, classifiers routing to the pattern, pre/post scripts and the variables they inject, and provenance of every variable the pattern reads.
@@ -27,11 +28,14 @@ pip install sn-patterns-mcp
 sn-patterns-mcp                              # boots the stdio MCP server (^C to exit)
 ```
 
-Register with Claude Code in one line:
+Register with Claude Code in one line each:
 
 ```bash
-claude mcp add sn-patterns sn-patterns-mcp
+claude mcp add sn-patterns         sn-patterns-mcp           # pattern intelligence
+claude mcp add sn-target-emulator  sn-target-emulator-mcp    # Tier-3 SNMP sandbox
 ```
+
+The second line is optional — only needed if you want the Tier-3 sandbox companion (see [docs/COMPANION.md](docs/COMPANION.md)).
 
 On a bare install (no PDI, no hydration), 8 tools already work end-to-end against the shipped data:
 
